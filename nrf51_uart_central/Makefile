@@ -1,4 +1,4 @@
-PROJECT_NAME := ble_app_uart_c_s130_pca10028
+PROJECT_NAME := nrf51_uart_central
 
 export OUTPUT_FILENAME
 #MAKEFILE_NAME := $(CURDIR)/$(word $(words $(MAKEFILE_LIST)),$(MAKEFILE_LIST))
@@ -168,7 +168,7 @@ vpath %.s $(ASM_PATHS)
 
 OBJECTS = $(C_OBJECTS) $(ASM_OBJECTS)
 
-nrf51422_xxac_s130: OUTPUT_FILENAME := nrf51422_xxac_s130
+nrf51422_xxac_s130: OUTPUT_FILENAME := nrf51_uart_central
 nrf51422_xxac_s130: LINKER_SCRIPT=ble_app_uart_c_gcc_nrf51.ld
 
 nrf51422_xxac_s130: $(BUILD_DIRECTORIES) $(OBJECTS)
