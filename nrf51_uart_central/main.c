@@ -135,6 +135,48 @@ static void db_disc_handler(ble_db_discovery_evt_t * p_evt)
  *          'new line' i.e '\n' (hex 0x0D) or if the string has reached a length of 
  *          @ref NUS_MAX_DATA_LENGTH.
  */
+#if 1    // modified by duvallee, 2017-03-20
+void uart_event_handle(app_uart_evt_t * p_event)
+{
+   static uint8_t data_array[BLE_NUS_MAX_DATA_LEN];
+   static uint8_t index                                  = 0;
+
+   switch (p_event->evt_type)
+   {
+      case APP_UART_DATA_READY :
+         {
+            index                                        = 0;
+            while (app_uart_get(&data_array[index]) == NRF_SUCCESS)
+            {
+               if (index >= BLE_NUS_MAX_DATA_LEN)
+               {
+                  break;
+               }
+               index++;
+            }
+            if (index != 0)
+            {
+               while (ble_nus_c_string_send(&m_ble_nus_c, data_array, index) != NRF_SUCCESS)
+               {
+                  // repeat until sent.
+               }
+            }
+         }
+         break;
+
+      case APP_UART_COMMUNICATION_ERROR:
+         APP_ERROR_HANDLER(p_event->data.error_communication);
+         break;
+
+      case APP_UART_FIFO_ERROR:
+         APP_ERROR_HANDLER(p_event->data.error_code);
+         break;
+
+      default:
+         break;
+   }
+}
+#else
 void uart_event_handle(app_uart_evt_t * p_event)
 {
     static uint8_t data_array[BLE_NUS_MAX_DATA_LEN];
@@ -169,7 +211,7 @@ void uart_event_handle(app_uart_evt_t * p_event)
             break;
     }
 }
-
+#endif
 
 /**@brief Callback handling NUS Client events.
  *
