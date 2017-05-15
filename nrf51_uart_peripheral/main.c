@@ -38,12 +38,374 @@
 #include "bsp.h"
 #include "bsp_btn_ble.h"
 
+
+#define SERIAL_RECEIVER
+
+#if defined(SERIAL_RECEIVER)
+
+// receiver type
+#define SERIAL_RX_SPEKTRUM_1024
+// #define SERIAL_RX_SPEKTRUM_2048
+// #define SERIAL_RX_S_BUS
+// #define SERIAL_RX_SUMD
+// #define SERIAL_RX_SUMH
+// #define SERIAL_RX_MODE_B
+// #define SERIAL_RX_MODE_B_BJ01
+// #define SERIAL_RX_IBUS
+// #define SERIAL_RX_MSP
+
+#define RX_CHANNEL_ROLL                                  0
+#define RX_CHANNEL_PITCH                                 1
+#define RX_CHANNEL_YAW                                   2
+#define RX_CHANNEL_THROTTLE                              3
+
+#if defined(SERIAL_RX_SPEKTRUM_1024)
+
+// UART
+// BAUDRATE : 125000 bps, or 1152000 bps
+// DATA     : 8 bits
+// PARITY   : NO Parity
+// stop bit : 1 stop
+
+#define SERIAL_RX_BAUDRATE                               (UART_BAUDRATE_BAUDRATE_Baud115200)
+#define DEVICE_NAME                                      "RX-SPEKTRUM-1024"         /**< Name of device. Will be included in the advertising data. */
+// 22 ms : (32768 * 22) / 1000
+#define SERIAL_RX_UPDATE_TICK_COUNT                      720
+
+#elif defined(SERIAL_RX_SPEKTRUM_2048)
+
+// UART
+// BAUDRATE : 125000 bps, or 1152000 bps
+// DATA     : 8 bits
+// PARITY   : NO Parity
+// stop bit : 1 stop
+
+#define SERIAL_RX_BAUDRATE                               (UART_BAUDRATE_BAUDRATE_Baud115200)
+#define DEVICE_NAME                                      "RX-SPEKTRUM-2048"         /**< Name of device. Will be included in the advertising data. */
+// 11 ms : (32768 * 11) / 1000
+#define SERIAL_RX_UPDATE_TICK_COUNT                      360
+
+#elif defined(SERIAL_RX_S_BUS)
+#define DEVICE_NAME                                      "RX-S-BUS"                 /**< Name of device. Will be included in the advertising data. */
+#elif defined(SERIAL_RX_SUMD)
+#define DEVICE_NAME                                      "RX-SUMD"                  /**< Name of device. Will be included in the advertising data. */
+#elif defined(SERIAL_RX_SUMH)
+#define DEVICE_NAME                                      "RX-SUMH"                  /**< Name of device. Will be included in the advertising data. */
+#elif defined(SERIAL_RX_MODE_B)
+#define DEVICE_NAME                                      "RX-MODE-B"                /**< Name of device. Will be included in the advertising data. */
+#elif defined(SERIAL_RX_MODE_B_BJ01)
+#define DEVICE_NAME                                      "RX-MODE-B-BJ01"           /**< Name of device. Will be included in the advertising data. */
+#elif defined(SERIAL_RX_IBUS)
+#define DEVICE_NAME                                      "RX-MODE-IBUS"             /**< Name of device. Will be included in the advertising data. */
+#elif defined(SERIAL_RX_MSP)
+#define DEVICE_NAME                                      "RX-MODE-MSP"              /**< Name of device. Will be included in the advertising data. */
+#else
+#define DEVICE_NAME                                      "Nordic_UART"              /**< Name of device. Will be included in the advertising data. */
+#endif
+
+#define SERIAL_BT_COMMAND_MAX_SIZE                       16
+#define SERIAL_BT_COMMAND_DECREASE_FLAG                  0xF000
+typedef struct
+{
+   uint8_t channel_id;
+   uint16_t value;
+   char command[SERIAL_BT_COMMAND_MAX_SIZE];
+} SERIAL_BT_COMMAND;
+
+typedef struct
+{
+   uint8_t channel_id;
+   uint16_t min;
+   uint16_t max;
+   uint16_t failsafe_value;
+   uint16_t value;
+} RX_CHANNEL;
+
+static SERIAL_BT_COMMAND g_bt_command[]                  =
+{
+   { RX_CHANNEL_ROLL,                                       10,      "ROLL-UP"},
+   { RX_CHANNEL_ROLL,     SERIAL_BT_COMMAND_DECREASE_FLAG | 10,      "ROLL-DOWN"},
+   { RX_CHANNEL_PITCH,                                      10,      "PITCH-UP"},
+   { RX_CHANNEL_PITCH,    SERIAL_BT_COMMAND_DECREASE_FLAG | 10,      "PITCH-DOWN"},
+   { RX_CHANNEL_YAW,                                        10,      "YAW-UP"},
+   { RX_CHANNEL_YAW,      SERIAL_BT_COMMAND_DECREASE_FLAG | 10,      "YAW-DOWN"},
+   { RX_CHANNEL_THROTTLE,                                    1,      "THROTTLE-UP"},
+   { RX_CHANNEL_THROTTLE,  SERIAL_BT_COMMAND_DECREASE_FLAG | 1,      "THROTTLE-DOWN"},
+};
+
+static RX_CHANNEL g_rx_channel[]                         =
+{
+   { RX_CHANNEL_ROLL,         0, 2000, 1000, 1000},
+   { RX_CHANNEL_PITCH,        0, 2000, 1000, 1000},
+   { RX_CHANNEL_YAW,          0, 2000, 1000, 1000},
+   { RX_CHANNEL_THROTTLE,     0, 2000,  500,  500},
+};
+
+uint8_t update_receiver_command(char* rx_bt_command)
+{
+   uint8_t i                                             = 0;
+   uint16_t level_value                                  = 0;
+   uint8_t max_command                                   = sizeof(g_bt_command) / sizeof(SERIAL_BT_COMMAND);
+
+   for (i = 0; i < max_command; i++)
+   {
+      if (strcmp(g_bt_command[i].command, rx_bt_command) == 0)
+      {
+         level_value                                     = (g_bt_command[i].value & 0xFFF);
+         if ((g_bt_command[i].value & SERIAL_BT_COMMAND_DECREASE_FLAG) == 0)
+         {
+            if ((g_rx_channel[g_bt_command[i].channel_id].value + level_value) > g_rx_channel[g_bt_command[i].channel_id].max)
+            {
+               g_rx_channel[g_bt_command[i].channel_id].value   = g_rx_channel[g_bt_command[i].channel_id].max;
+            }
+            else
+            {
+               g_rx_channel[g_bt_command[i].channel_id].value  += level_value;
+            }
+         }
+         else
+         {
+            if ((g_rx_channel[g_bt_command[i].channel_id].value - level_value) <= g_rx_channel[g_bt_command[i].channel_id].min)
+            {
+               g_rx_channel[g_bt_command[i].channel_id].value   = g_rx_channel[g_bt_command[i].channel_id].min;
+            }
+            else
+            {
+               g_rx_channel[g_bt_command[i].channel_id].value  -= level_value;
+            }
+            if (g_rx_channel[g_bt_command[i].channel_id].value > g_rx_channel[g_bt_command[i].channel_id].max)
+            {
+               g_rx_channel[g_bt_command[i].channel_id].value   = g_rx_channel[g_bt_command[i].channel_id].min;
+            }
+         }
+         return 0;
+      }
+   }
+   return -1;
+}
+
+#if defined(SERIAL_RX_SPEKTRUM_1024)
+
+#define MASK_1024_CHANID                                 0xFC00
+#define MASK_1024_SXPOS                                  0x03FF
+#define MAX_CHANNEL_COUNT                                7
+
+#define DSM2_22MS                                        0x01                    // 1024
+#define DSM2_11MS                                        0x12                    // 2048
+#define DSMS_22MS                                        0xA2                    // 2048
+#define DSMX_11MS                                        0xB2                    // 2048
+
+#define SPEKTRUM_CHANNEL_THROTTLE                        0
+#define SPEKTRUM_CHANNEL_AILERON                         1
+#define SPEKTRUM_CHANNEL_ELEVATOR                        2
+#define SPEKTRUM_CHANNEL_RUDDER                          3
+#define SPEKTRUM_CHANNEL_GEAR                            4
+#define SPEKTRUM_CHANNEL_AUX_1                           5
+#define SPEKTRUM_CHANNEL_AUX_2                           6
+#define SPEKTRUM_CHANNEL_AUX_3                           7
+#define SPEKTRUM_CHANNEL_AUX_4                           8
+#define SPEKTRUM_CHANNEL_AUX_5                           9
+#define SPEKTRUM_CHANNEL_AUX_6                           10
+#define SPEKTRUM_CHANNEL_AUX_7                           11
+
+typedef struct
+{
+   uint8_t fades;
+   uint8_t system;
+   uint16_t channel[MAX_CHANNEL_COUNT];
+} RX_PACKET_SPEKTRUM_1024;
+
+#define RX_PACKET_SPEKTRUM_CHANNEL_ID_0                  0
+#define RX_PACKET_SPEKTRUM_CHANNEL_ID_1                  1
+#define RX_PACKET_SPEKTRUM_CHANNEL_ID_2                  2
+#define RX_PACKET_SPEKTRUM_CHANNEL_ID_3                  3
+#define RX_PACKET_SPEKTRUM_CHANNEL_ID_4                  4
+#define RX_PACKET_SPEKTRUM_CHANNEL_ID_5                  5
+#define RX_PACKET_SPEKTRUM_CHANNEL_ID_6                  6
+
+uint8_t send_receiver_command()
+{
+   RX_PACKET_SPEKTRUM_1024 packet;
+   memset(&packet, 0, sizeof(RX_PACKET_SPEKTRUM_1024));
+
+   // missed frames for remote
+   // always is null
+   packet.fades                                          = 0;
+   // type of receiver
+   packet.system                                         = DSM2_22MS;
+
+   // throttle (드론 상승, 하강)
+   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_0]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_THROTTLE << 10))       |
+                                                           (g_rx_channel[RX_CHANNEL_THROTTLE].value & MASK_1024_SXPOS);
+
+   // Aileron (좌측 이동, 우측 이동)
+   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_1]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_AILERON << 10))       |
+                                                           (g_rx_channel[RX_CHANNEL_ROLL].value & MASK_1024_SXPOS);
+
+   // Elevator (전진, 후진)
+   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_2]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_ELEVATOR << 10))       |
+                                                           (g_rx_channel[RX_CHANNEL_PITCH].value & MASK_1024_SXPOS);
+
+   // Rudder (시계방향 회전, 반 시계방향 회전)
+   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_3]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_RUDDER << 10))       |
+                                                           (g_rx_channel[RX_CHANNEL_YAW].value & MASK_1024_SXPOS);
+
+   // ADC 1
+   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_4]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_AUX_1 << 10));
+   // ADC 2
+   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_5]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_AUX_2 << 10));
+   // ADC 3
+   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_AUX_3 << 10));
+
+   // fades
+   while(app_uart_put(packet.fades) != NRF_SUCCESS);
+   // system
+   while(app_uart_put(packet.system) != NRF_SUCCESS);
+   
+   // throttle
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_0] >> 8) & 0xFF)) != NRF_SUCCESS);
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_0]     ) & 0xFF)) != NRF_SUCCESS);
+
+   // aileron
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_1] >> 8) & 0xFF)) != NRF_SUCCESS);
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_1]     ) & 0xFF)) != NRF_SUCCESS);
+
+   // aileron
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_2] >> 8) & 0xFF)) != NRF_SUCCESS);
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_2]     ) & 0xFF)) != NRF_SUCCESS);
+
+   // rudder
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_3] >> 8) & 0xFF)) != NRF_SUCCESS);
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_3]     ) & 0xFF)) != NRF_SUCCESS);
+
+   // adc 1
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_4] >> 8) & 0xFF)) != NRF_SUCCESS);
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_4]     ) & 0xFF)) != NRF_SUCCESS);
+
+   // adc 2
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_5] >> 8) & 0xFF)) != NRF_SUCCESS);
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_5]     ) & 0xFF)) != NRF_SUCCESS);
+
+   // adc 3
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6] >> 8) & 0xFF)) != NRF_SUCCESS);
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6]     ) & 0xFF)) != NRF_SUCCESS);
+
+   return 0;
+}
+
+#elif defined(SERIAL_RX_SPEKTRUM_2048)
+
+#define DSM2_22MS                                        0x01                    // 1024
+#define DSM2_11MS                                        0x12                    // 2048
+#define DSMS_22MS                                        0xA2                    // 2048
+#define DSMX_11MS                                        0xB2                    // 2048
+
+
+uint8_t send_receiver_command()
+{
+   return 0;
+}
+
+#elif defined(SERIAL_RX_S_BUS)
+
+uint8_t send_receiver_command()
+{
+   return 0;
+}
+
+#elif defined(SERIAL_RX_SUMD)
+
+uint8_t send_receiver_command()
+{
+   return 0;
+}
+
+#elif defined(SERIAL_RX_SUMH)
+
+uint8_t send_receiver_command()
+{
+   return 0;
+}
+
+#elif defined(SERIAL_RX_MODE_B)
+
+uint8_t send_receiver_command()
+{
+   return 0;
+}
+
+#elif defined(SERIAL_RX_MODE_B_BJ01)
+
+uint8_t send_receiver_command()
+{
+   return 0;
+}
+
+#elif defined(SERIAL_RX_IBUS)
+
+uint8_t send_receiver_command()
+{
+   return 0;
+}
+
+#elif defined(SERIAL_RX_MSP)
+
+uint8_t send_receiver_command()
+{
+   return 0;
+}
+
+#else
+
+uint8_t send_receiver_command()
+{
+   return 0;
+}
+
+#endif
+
+static uint32_t g_prev_tick_count                        = 0;
+static uint32_t g_update_tick_count                      = 0;
+void serial_receiver_timer_handler(void * p_context)
+{
+   uint32_t cur_tick_count                               = 0;
+   uint32_t diff_tick_count                              = 0;
+   if (g_prev_tick_count == 0)
+   {
+      if (app_timer_cnt_get(&g_prev_tick_count) != NRF_SUCCESS)
+      {
+         printf("Can't get tick count \r\n");
+      }
+      return;
+   }
+   if (app_timer_cnt_get(&cur_tick_count) != NRF_SUCCESS)
+   {
+      printf("Can't get tick count \r\n");
+      return;
+   }
+
+   if (app_timer_cnt_diff_compute(cur_tick_count, g_prev_tick_count, &diff_tick_count) != NRF_SUCCESS)
+   {
+      printf("Can't diff tick count \r\n");
+      return;
+   }
+   g_prev_tick_count                                     = cur_tick_count;
+
+   g_update_tick_count                                   += diff_tick_count;
+   if (g_update_tick_count > SERIAL_RX_UPDATE_TICK_COUNT)
+   {
+      g_update_tick_count                                = 0;
+      send_receiver_command();
+   }
+}
+
+#endif   // SERIAL_RECEIVER
+
 #define IS_SRVC_CHANGED_CHARACT_PRESENT 0                                           /**< Include the service_changed characteristic. If not enabled, the server's database cannot be changed for the lifetime of the device. */
 
 #define CENTRAL_LINK_COUNT              0                                           /**< Number of central links used by the application. When changing this number remember to adjust the RAM settings*/
 #define PERIPHERAL_LINK_COUNT           1                                           /**< Number of peripheral links used by the application. When changing this number remember to adjust the RAM settings*/
 
-#define DEVICE_NAME                     "Nordic_UART"                               /**< Name of device. Will be included in the advertising data. */
 #define NUS_SERVICE_UUID_TYPE           BLE_UUID_TYPE_VENDOR_BEGIN                  /**< UUID type for the Nordic UART Service (vendor specific). */
 
 #define APP_ADV_INTERVAL                64                                          /**< The advertising interval (in units of 0.625 ms. This value corresponds to 40 ms). */
@@ -132,6 +494,15 @@ static void gap_params_init(void)
 /**@snippet [Handling the data received over BLE] */
 static void nus_data_handler(ble_nus_t * p_nus, uint8_t * p_data, uint16_t length)
 {
+#if defined(SERIAL_RECEIVER)
+   char bt_rx_command[SERIAL_BT_COMMAND_MAX_SIZE + 1];
+   if (length < SERIAL_BT_COMMAND_MAX_SIZE)
+   {
+      memset(bt_rx_command, 0, sizeof(bt_rx_command) + 1);
+      memcpy(bt_rx_command, p_data, length);
+      update_receiver_command(bt_rx_command);
+   }
+#else
     for (uint32_t i = 0; i < length; i++)
     {
         while(app_uart_put(p_data[i]) != NRF_SUCCESS);
@@ -139,6 +510,7 @@ static void nus_data_handler(ble_nus_t * p_nus, uint8_t * p_data, uint16_t lengt
   #if 0
     while(app_uart_put('\n') != NRF_SUCCESS);
   #endif
+#endif
 }
 /**@snippet [Handling the data received over BLE] */
 
@@ -468,7 +840,11 @@ static void uart_init(void)
         CTS_PIN_NUMBER,
         APP_UART_FLOW_CONTROL_ENABLED,
         false,
+#if defined(SERIAL_RECEIVER)
+        SERIAL_RX_BAUDRATE
+#else
         UART_BAUDRATE_BAUDRATE_Baud115200
+#endif
     };
 
     APP_UART_FIFO_INIT( &comm_params,
@@ -545,9 +921,14 @@ int main(void)
 {
     uint32_t err_code;
     bool erase_bonds;
+#if !defined(SERIAL_RECEIVER)
     uint8_t start_string[] = START_STRING;
+#endif
     // Initialize.
     APP_TIMER_INIT(APP_TIMER_PRESCALER, APP_TIMER_OP_QUEUE_SIZE, false);
+#if defined(SERIAL_RECEIVER)
+    APP_TIMER_DEF(serial_rx_timer);
+#endif
     uart_init();
 
     buttons_leds_init(&erase_bonds);
@@ -557,9 +938,22 @@ int main(void)
     advertising_init();
     conn_params_init();
 
+#if !defined(SERIAL_RECEIVER)
     printf("%s", start_string);
+#endif
     err_code = ble_advertising_start(BLE_ADV_MODE_FAST);
     APP_ERROR_CHECK(err_code);
+
+#if defined(SERIAL_RECEIVER)
+   if (app_timer_create(&serial_rx_timer, APP_TIMER_MODE_REPEATED, serial_receiver_timer_handler) != NRF_SUCCESS)
+   {
+      printf("Can't create app timer \r\n");
+   }
+   if (app_timer_start(serial_rx_timer, APP_TIMER_TICKS(1, APP_TIMER_PRESCALER), NULL) != NRF_SUCCESS)
+   {
+      printf("Can't start app timer \r\n");
+   }
+#endif
 
     // Enter main loop.
     for (;;)
