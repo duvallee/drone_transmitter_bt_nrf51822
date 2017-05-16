@@ -72,6 +72,22 @@
 // 22 ms : (32768 * 22) / 1000
 #define SERIAL_RX_UPDATE_TICK_COUNT                      720
 
+#define SERIAL_RX_ROLL_MIN                               0
+#define SERIAL_RX_ROLL_MAX                               1023
+#define SERIAL_RX_ROLL_DEFAULT                           512
+
+#define SERIAL_RX_PITCH_MIN                              0
+#define SERIAL_RX_PITCH_MAX                              1023
+#define SERIAL_RX_PITCH_DEFAULT                          512
+
+#define SERIAL_RX_YAW_MIN                                0
+#define SERIAL_RX_YAW_MAX                                1023
+#define SERIAL_RX_YAW_DEFAULT                            512
+
+#define SERIAL_RX_THROTTLE_MIN                           0
+#define SERIAL_RX_THROTTLE_MAX                           1023
+#define SERIAL_RX_THROTTLE_DEFAULT                       100
+
 #elif defined(SERIAL_RX_SPEKTRUM_2048)
 
 // UART
@@ -123,22 +139,22 @@ typedef struct
 
 static SERIAL_BT_COMMAND g_bt_command[]                  =
 {
-   { RX_CHANNEL_ROLL,                                       10,      "ROLL-UP"},
-   { RX_CHANNEL_ROLL,     SERIAL_BT_COMMAND_DECREASE_FLAG | 10,      "ROLL-DOWN"},
-   { RX_CHANNEL_PITCH,                                      10,      "PITCH-UP"},
-   { RX_CHANNEL_PITCH,    SERIAL_BT_COMMAND_DECREASE_FLAG | 10,      "PITCH-DOWN"},
-   { RX_CHANNEL_YAW,                                        10,      "YAW-UP"},
-   { RX_CHANNEL_YAW,      SERIAL_BT_COMMAND_DECREASE_FLAG | 10,      "YAW-DOWN"},
+   { RX_CHANNEL_ROLL,                                        1,      "ROLL-UP"},
+   { RX_CHANNEL_ROLL,     SERIAL_BT_COMMAND_DECREASE_FLAG |  1,      "ROLL-DOWN"},
+   { RX_CHANNEL_PITCH,                                       1,      "PITCH-UP"},
+   { RX_CHANNEL_PITCH,    SERIAL_BT_COMMAND_DECREASE_FLAG |  1,      "PITCH-DOWN"},
+   { RX_CHANNEL_YAW,                                         1,      "YAW-UP"},
+   { RX_CHANNEL_YAW,      SERIAL_BT_COMMAND_DECREASE_FLAG |  1,      "YAW-DOWN"},
    { RX_CHANNEL_THROTTLE,                                    1,      "THROTTLE-UP"},
    { RX_CHANNEL_THROTTLE,  SERIAL_BT_COMMAND_DECREASE_FLAG | 1,      "THROTTLE-DOWN"},
 };
 
 static RX_CHANNEL g_rx_channel[]                         =
 {
-   { RX_CHANNEL_ROLL,         0, 2000, 1000, 1000},
-   { RX_CHANNEL_PITCH,        0, 2000, 1000, 1000},
-   { RX_CHANNEL_YAW,          0, 2000, 1000, 1000},
-   { RX_CHANNEL_THROTTLE,     0, 2000,  500,  500},
+   { RX_CHANNEL_ROLL,         SERIAL_RX_ROLL_MIN,     SERIAL_RX_ROLL_MAX,     SERIAL_RX_ROLL_DEFAULT,       SERIAL_RX_ROLL_DEFAULT},
+   { RX_CHANNEL_PITCH,        SERIAL_RX_PITCH_MIN,    SERIAL_RX_PITCH_MAX,    SERIAL_RX_PITCH_DEFAULT,      SERIAL_RX_PITCH_DEFAULT},
+   { RX_CHANNEL_YAW,          SERIAL_RX_YAW_MIN,      SERIAL_RX_YAW_MAX,      SERIAL_RX_YAW_DEFAULT,        SERIAL_RX_YAW_DEFAULT},
+   { RX_CHANNEL_THROTTLE,     SERIAL_RX_THROTTLE_MIN, SERIAL_RX_THROTTLE_MAX, SERIAL_RX_THROTTLE_DEFAULT,   SERIAL_RX_THROTTLE_DEFAULT},
 };
 
 uint8_t update_receiver_command(char* rx_bt_command)
@@ -178,6 +194,9 @@ uint8_t update_receiver_command(char* rx_bt_command)
                g_rx_channel[g_bt_command[i].channel_id].value   = g_rx_channel[g_bt_command[i].channel_id].min;
             }
          }
+#if 0
+         printf("%s = %d \r\n", g_bt_command[i].command, g_rx_channel[g_bt_command[i].channel_id].value);
+#endif
          return 0;
       }
    }
@@ -239,7 +258,7 @@ uint8_t send_receiver_command()
                                                            (g_rx_channel[RX_CHANNEL_THROTTLE].value & MASK_1024_SXPOS);
 
    // Aileron (좌측 이동, 우측 이동)
-   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_1]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_AILERON << 10))       |
+   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_1]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_AILERON << 10))        |
                                                            (g_rx_channel[RX_CHANNEL_ROLL].value & MASK_1024_SXPOS);
 
    // Elevator (전진, 후진)
@@ -247,49 +266,120 @@ uint8_t send_receiver_command()
                                                            (g_rx_channel[RX_CHANNEL_PITCH].value & MASK_1024_SXPOS);
 
    // Rudder (시계방향 회전, 반 시계방향 회전)
-   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_3]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_RUDDER << 10))       |
+   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_3]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_RUDDER << 10))         |
                                                            (g_rx_channel[RX_CHANNEL_YAW].value & MASK_1024_SXPOS);
 
+   // GEAR
+   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_4]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_GEAR << 10))           |
+                                                           (0x200 & MASK_1024_SXPOS);
    // ADC 1
-   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_4]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_AUX_1 << 10));
-   // ADC 2
-   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_5]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_AUX_2 << 10));
-   // ADC 3
-   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_AUX_3 << 10));
+   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_5]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_AUX_2 << 10))          |
+                                                           (0x200 & MASK_1024_SXPOS);
 
+   // ADC 2
+   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_AUX_3 << 10))          |
+                                                           (0x200 & MASK_1024_SXPOS);
+
+#if 0
+   {
+      printf("\r\n");
+      printf("[%04x] ", packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_0]);
+      printf("[%04x] ", packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_1]);
+      printf("[%04x] ", packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_2]);
+      printf("[%04x] ", packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_3]);
+      printf("[%04x] ", packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_4]);
+      printf("[%04x] ", packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_5]);
+      printf("[%04x] ", packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6]);
+   }
+#endif
+
+#if 1
    // fades
-   while(app_uart_put(packet.fades) != NRF_SUCCESS);
+   while(app_uart_put(packet.fades) != NRF_SUCCESS)
+   {
+   }
    // system
-   while(app_uart_put(packet.system) != NRF_SUCCESS);
+   while(app_uart_put(packet.system) != NRF_SUCCESS)
+   {
+   }
    
    // throttle
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_0] >> 8) & 0xFF)) != NRF_SUCCESS);
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_0]     ) & 0xFF)) != NRF_SUCCESS);
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_0] >> 8) & 0xFF)) != NRF_SUCCESS)
+   {
+   }
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_0]     ) & 0xFF)) != NRF_SUCCESS)
+   {
+   }
 
    // aileron
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_1] >> 8) & 0xFF)) != NRF_SUCCESS);
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_1]     ) & 0xFF)) != NRF_SUCCESS);
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_1] >> 8) & 0xFF)) != NRF_SUCCESS)
+   {
+   }
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_1]     ) & 0xFF)) != NRF_SUCCESS)
+   {
+   }
 
    // aileron
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_2] >> 8) & 0xFF)) != NRF_SUCCESS);
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_2]     ) & 0xFF)) != NRF_SUCCESS);
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_2] >> 8) & 0xFF)) != NRF_SUCCESS)
+   {
+   }
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_2]     ) & 0xFF)) != NRF_SUCCESS)
+   {
+   }
 
    // rudder
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_3] >> 8) & 0xFF)) != NRF_SUCCESS);
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_3]     ) & 0xFF)) != NRF_SUCCESS);
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_3] >> 8) & 0xFF)) != NRF_SUCCESS)
+   {
+   }
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_3]     ) & 0xFF)) != NRF_SUCCESS)
+   {
+   }
 
    // adc 1
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_4] >> 8) & 0xFF)) != NRF_SUCCESS);
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_4]     ) & 0xFF)) != NRF_SUCCESS);
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_4] >> 8) & 0xFF)) != NRF_SUCCESS)
+   {
+   }
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_4]     ) & 0xFF)) != NRF_SUCCESS)
+   {
+   }
 
    // adc 2
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_5] >> 8) & 0xFF)) != NRF_SUCCESS);
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_5]     ) & 0xFF)) != NRF_SUCCESS);
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_5] >> 8) & 0xFF)) != NRF_SUCCESS)
+   {
+   }
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_5]     ) & 0xFF)) != NRF_SUCCESS)
+   {
+   }
 
    // adc 3
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6] >> 8) & 0xFF)) != NRF_SUCCESS);
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6]     ) & 0xFF)) != NRF_SUCCESS);
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6] >> 8) & 0xFF)) != NRF_SUCCESS)
+   {
+   }
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6]     ) & 0xFF)) != NRF_SUCCESS)
+   {
+   }
+#endif
 
+#if 0
+   {
+      printf("\r\n");
+      printf("[%02x] [%02x] ",   packet.fades, packet.system);
+      printf("[%02x] [%02x] : ", (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_0] >> 8) & 0xFF),
+                                 (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_0]     ) & 0xFF));
+      printf("[%02x] [%02x] : ", (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_1] >> 8) & 0xFF),
+                                 (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_1]     ) & 0xFF));
+      printf("[%02x] [%02x] : ", (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_2] >> 8) & 0xFF),
+                                 (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_2]     ) & 0xFF));
+      printf("[%02x] [%02x] : ", (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_3] >> 8) & 0xFF),
+                                 (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_3]     ) & 0xFF));
+      printf("[%02x] [%02x] : ", (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_4] >> 8) & 0xFF),
+                                 (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_4]     ) & 0xFF));
+      printf("[%02x] [%02x] : ", (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_5] >> 8) & 0xFF),
+                                 (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_5]     ) & 0xFF));
+      printf("[%02x] [%02x] ",   (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6] >> 8) & 0xFF),
+                                 (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6]     ) & 0xFF));
+   }
+#endif
    return 0;
 }
 
