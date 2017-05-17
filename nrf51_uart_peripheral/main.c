@@ -45,7 +45,7 @@
 
 // receiver type
 #define SERIAL_RX_SPEKTRUM_1024
-// #define SERIAL_RX_SPEKTRUM_2048
+//#define SERIAL_RX_SPEKTRUM_2048
 // #define SERIAL_RX_S_BUS
 // #define SERIAL_RX_SUMD
 // #define SERIAL_RX_SUMH
@@ -100,6 +100,22 @@
 #define DEVICE_NAME                                      "RX-SPEKTRUM-2048"         /**< Name of device. Will be included in the advertising data. */
 // 11 ms : (32768 * 11) / 1000
 #define SERIAL_RX_UPDATE_TICK_COUNT                      360
+
+#define SERIAL_RX_ROLL_MIN                               0
+#define SERIAL_RX_ROLL_MAX                               2047
+#define SERIAL_RX_ROLL_DEFAULT                           1024
+
+#define SERIAL_RX_PITCH_MIN                              0
+#define SERIAL_RX_PITCH_MAX                              2047
+#define SERIAL_RX_PITCH_DEFAULT                          1024
+
+#define SERIAL_RX_YAW_MIN                                0
+#define SERIAL_RX_YAW_MAX                                2047
+#define SERIAL_RX_YAW_DEFAULT                            1024
+
+#define SERIAL_RX_THROTTLE_MIN                           0
+#define SERIAL_RX_THROTTLE_MAX                           2047
+#define SERIAL_RX_THROTTLE_DEFAULT                       200
 
 #elif defined(SERIAL_RX_S_BUS)
 #define DEVICE_NAME                                      "RX-S-BUS"                 /**< Name of device. Will be included in the advertising data. */
@@ -207,6 +223,9 @@ uint8_t update_receiver_command(char* rx_bt_command)
 
 #define MASK_1024_CHANID                                 0xFC00
 #define MASK_1024_SXPOS                                  0x03FF
+
+#define SPEKTRUM_1024_CHANNEL_SHIFT_BITS                 10
+
 #define MAX_CHANNEL_COUNT                                7
 
 #define DSM2_22MS                                        0x01                    // 1024
@@ -254,30 +273,30 @@ uint8_t send_receiver_command()
    packet.system                                         = DSM2_22MS;
 
    // throttle (드론 상승, 하강)
-   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_0]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_THROTTLE << 10))       |
+   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_0]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_THROTTLE << SPEKTRUM_1024_CHANNEL_SHIFT_BITS))       |
                                                            (g_rx_channel[RX_CHANNEL_THROTTLE].value & MASK_1024_SXPOS);
 
    // Aileron (좌측 이동, 우측 이동)
-   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_1]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_AILERON << 10))        |
+   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_1]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_AILERON << SPEKTRUM_1024_CHANNEL_SHIFT_BITS))        |
                                                            (g_rx_channel[RX_CHANNEL_ROLL].value & MASK_1024_SXPOS);
 
    // Elevator (전진, 후진)
-   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_2]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_ELEVATOR << 10))       |
+   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_2]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_ELEVATOR << SPEKTRUM_1024_CHANNEL_SHIFT_BITS))       |
                                                            (g_rx_channel[RX_CHANNEL_PITCH].value & MASK_1024_SXPOS);
 
    // Rudder (시계방향 회전, 반 시계방향 회전)
-   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_3]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_RUDDER << 10))         |
+   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_3]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_RUDDER << SPEKTRUM_1024_CHANNEL_SHIFT_BITS))         |
                                                            (g_rx_channel[RX_CHANNEL_YAW].value & MASK_1024_SXPOS);
 
    // GEAR
-   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_4]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_GEAR << 10))           |
+   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_4]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_GEAR << SPEKTRUM_1024_CHANNEL_SHIFT_BITS))           |
                                                            (0x200 & MASK_1024_SXPOS);
    // ADC 1
-   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_5]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_AUX_2 << 10))          |
+   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_5]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_AUX_2 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS))          |
                                                            (0x200 & MASK_1024_SXPOS);
 
    // ADC 2
-   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_AUX_3 << 10))          |
+   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_AUX_3 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS))          |
                                                            (0x200 & MASK_1024_SXPOS);
 
 #if 0
@@ -385,14 +404,185 @@ uint8_t send_receiver_command()
 
 #elif defined(SERIAL_RX_SPEKTRUM_2048)
 
+#define MASK_2048_PHASE                                  0x8000
+#define MASK_2048_CHANID                                 0x7800
+#define MASK_2048_SXPOS                                  0x07FF
+
+#define SPEKTRUM_2048_CHANNEL_SHIFT_BITS                 11
+
+#define MAX_CHANNEL_COUNT                                7
+
 #define DSM2_22MS                                        0x01                    // 1024
 #define DSM2_11MS                                        0x12                    // 2048
 #define DSMS_22MS                                        0xA2                    // 2048
 #define DSMX_11MS                                        0xB2                    // 2048
 
+#define SPEKTRUM_CHANNEL_THROTTLE                        0
+#define SPEKTRUM_CHANNEL_AILERON                         1
+#define SPEKTRUM_CHANNEL_ELEVATOR                        2
+#define SPEKTRUM_CHANNEL_RUDDER                          3
+#define SPEKTRUM_CHANNEL_GEAR                            4
+#define SPEKTRUM_CHANNEL_AUX_1                           5
+#define SPEKTRUM_CHANNEL_AUX_2                           6
+#define SPEKTRUM_CHANNEL_AUX_3                           7
+#define SPEKTRUM_CHANNEL_AUX_4                           8
+#define SPEKTRUM_CHANNEL_AUX_5                           9
+#define SPEKTRUM_CHANNEL_AUX_6                           10
+#define SPEKTRUM_CHANNEL_AUX_7                           11
+
+typedef struct
+{
+   uint8_t fades;
+   uint8_t system;
+   uint16_t channel[MAX_CHANNEL_COUNT];
+} RX_PACKET_SPEKTRUM_1024;
+
+#define RX_PACKET_SPEKTRUM_CHANNEL_ID_0                  0
+#define RX_PACKET_SPEKTRUM_CHANNEL_ID_1                  1
+#define RX_PACKET_SPEKTRUM_CHANNEL_ID_2                  2
+#define RX_PACKET_SPEKTRUM_CHANNEL_ID_3                  3
+#define RX_PACKET_SPEKTRUM_CHANNEL_ID_4                  4
+#define RX_PACKET_SPEKTRUM_CHANNEL_ID_5                  5
+#define RX_PACKET_SPEKTRUM_CHANNEL_ID_6                  6
 
 uint8_t send_receiver_command()
 {
+   RX_PACKET_SPEKTRUM_1024 packet;
+   memset(&packet, 0, sizeof(RX_PACKET_SPEKTRUM_1024));
+
+   // missed frames for remote
+   // always is null
+   packet.fades                                          = 0;
+   // type of receiver
+   packet.system                                         = DSMX_11MS;
+
+   // throttle (드론 상승, 하강)
+   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_0]       = (MASK_2048_CHANID & (SPEKTRUM_CHANNEL_THROTTLE << SPEKTRUM_2048_CHANNEL_SHIFT_BITS))       |
+                                                           (g_rx_channel[RX_CHANNEL_THROTTLE].value & MASK_2048_SXPOS);
+
+   // Aileron (좌측 이동, 우측 이동)
+   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_1]       = (MASK_2048_CHANID & (SPEKTRUM_CHANNEL_AILERON << SPEKTRUM_2048_CHANNEL_SHIFT_BITS))        |
+                                                           (g_rx_channel[RX_CHANNEL_ROLL].value & MASK_2048_SXPOS);
+
+   // Elevator (전진, 후진)
+   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_2]       = (MASK_2048_CHANID & (SPEKTRUM_CHANNEL_ELEVATOR << SPEKTRUM_2048_CHANNEL_SHIFT_BITS))       |
+                                                           (g_rx_channel[RX_CHANNEL_PITCH].value & MASK_2048_SXPOS);
+
+   // Rudder (시계방향 회전, 반 시계방향 회전)
+   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_3]       = (MASK_2048_CHANID & (SPEKTRUM_CHANNEL_RUDDER << SPEKTRUM_2048_CHANNEL_SHIFT_BITS))         |
+                                                           (g_rx_channel[RX_CHANNEL_YAW].value & MASK_2048_SXPOS);
+
+   // GEAR
+   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_4]       = (MASK_2048_CHANID & (SPEKTRUM_CHANNEL_GEAR << SPEKTRUM_2048_CHANNEL_SHIFT_BITS))           |
+                                                           (0x400 & MASK_2048_SXPOS);
+   // ADC 1
+   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_5]       = (MASK_2048_CHANID & (SPEKTRUM_CHANNEL_AUX_2 << SPEKTRUM_2048_CHANNEL_SHIFT_BITS))          |
+                                                           (0x400 & MASK_2048_SXPOS);
+
+   // ADC 2
+   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6]       = (MASK_2048_CHANID & (SPEKTRUM_CHANNEL_AUX_3 << SPEKTRUM_2048_CHANNEL_SHIFT_BITS))          |
+                                                           (0x400 & MASK_2048_SXPOS);
+
+#if 0
+   {
+      printf("\r\n");
+      printf("[%04x] ", packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_0]);
+      printf("[%04x] ", packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_1]);
+      printf("[%04x] ", packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_2]);
+      printf("[%04x] ", packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_3]);
+      printf("[%04x] ", packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_4]);
+      printf("[%04x] ", packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_5]);
+      printf("[%04x] ", packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6]);
+   }
+#endif
+
+#if 1
+   // fades
+   while(app_uart_put(packet.fades) != NRF_SUCCESS)
+   {
+   }
+   // system
+   while(app_uart_put(packet.system) != NRF_SUCCESS)
+   {
+   }
+   
+   // throttle
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_0] >> 8) & 0xFF)) != NRF_SUCCESS)
+   {
+   }
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_0]     ) & 0xFF)) != NRF_SUCCESS)
+   {
+   }
+
+   // aileron
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_1] >> 8) & 0xFF)) != NRF_SUCCESS)
+   {
+   }
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_1]     ) & 0xFF)) != NRF_SUCCESS)
+   {
+   }
+
+   // aileron
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_2] >> 8) & 0xFF)) != NRF_SUCCESS)
+   {
+   }
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_2]     ) & 0xFF)) != NRF_SUCCESS)
+   {
+   }
+
+   // rudder
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_3] >> 8) & 0xFF)) != NRF_SUCCESS)
+   {
+   }
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_3]     ) & 0xFF)) != NRF_SUCCESS)
+   {
+   }
+
+   // adc 1
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_4] >> 8) & 0xFF)) != NRF_SUCCESS)
+   {
+   }
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_4]     ) & 0xFF)) != NRF_SUCCESS)
+   {
+   }
+
+   // adc 2
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_5] >> 8) & 0xFF)) != NRF_SUCCESS)
+   {
+   }
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_5]     ) & 0xFF)) != NRF_SUCCESS)
+   {
+   }
+
+   // adc 3
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6] >> 8) & 0xFF)) != NRF_SUCCESS)
+   {
+   }
+   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6]     ) & 0xFF)) != NRF_SUCCESS)
+   {
+   }
+#endif
+
+#if 0
+   {
+      printf("\r\n");
+      printf("[%02x] [%02x] ",   packet.fades, packet.system);
+      printf("[%02x] [%02x] : ", (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_0] >> 8) & 0xFF),
+                                 (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_0]     ) & 0xFF));
+      printf("[%02x] [%02x] : ", (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_1] >> 8) & 0xFF),
+                                 (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_1]     ) & 0xFF));
+      printf("[%02x] [%02x] : ", (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_2] >> 8) & 0xFF),
+                                 (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_2]     ) & 0xFF));
+      printf("[%02x] [%02x] : ", (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_3] >> 8) & 0xFF),
+                                 (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_3]     ) & 0xFF));
+      printf("[%02x] [%02x] : ", (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_4] >> 8) & 0xFF),
+                                 (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_4]     ) & 0xFF));
+      printf("[%02x] [%02x] : ", (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_5] >> 8) & 0xFF),
+                                 (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_5]     ) & 0xFF));
+      printf("[%02x] [%02x] ",   (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6] >> 8) & 0xFF),
+                                 (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6]     ) & 0xFF));
+   }
+#endif
    return 0;
 }
 
