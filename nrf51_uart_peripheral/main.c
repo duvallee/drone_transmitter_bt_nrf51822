@@ -59,6 +59,15 @@
 #define RX_CHANNEL_YAW                                   2
 #define RX_CHANNEL_THROTTLE                              3
 
+void app_sleep()
+{
+static int app_sleep_count                               = 100;
+   int i;
+   for (i = 0; i < app_sleep_count; i++)
+   {
+   }
+}
+
 #if defined(SERIAL_RX_SPEKTRUM_1024)
 
 // UART
@@ -135,7 +144,20 @@
 #define DEVICE_NAME                                      "Nordic_UART"              /**< Name of device. Will be included in the advertising data. */
 #endif
 
-#define SERIAL_BT_COMMAND_MAX_SIZE                       16
+
+// -----------------------------------------------------------------------------
+// protocol for phone and bt's receiver
+#define SERIAL_BT_COMMAND_MAX_SIZE                       32
+static uint8_t g_bt_rx_command[SERIAL_BT_COMMAND_MAX_SIZE];
+
+static uint8_t g_bt_rx_command_complete                  = 0;
+
+static uint32_t g_prev_tick_count                        = 0;
+static uint32_t g_update_tick_count                      = 0;
+
+static uint8_t g_update_packet_complete                  = 0;
+// -----------------------------------------------------------------------------
+
 #define SERIAL_BT_COMMAND_DECREASE_FLAG                  0xF000
 typedef struct
 {
@@ -173,7 +195,7 @@ static RX_CHANNEL g_rx_channel[]                         =
    { RX_CHANNEL_THROTTLE,     SERIAL_RX_THROTTLE_MIN, SERIAL_RX_THROTTLE_MAX, SERIAL_RX_THROTTLE_DEFAULT,   SERIAL_RX_THROTTLE_DEFAULT},
 };
 
-uint8_t update_receiver_command(char* rx_bt_command)
+uint8_t update_receiver_command()
 {
    uint8_t i                                             = 0;
    uint16_t level_value                                  = 0;
@@ -181,7 +203,7 @@ uint8_t update_receiver_command(char* rx_bt_command)
 
    for (i = 0; i < max_command; i++)
    {
-      if (strcmp(g_bt_command[i].command, rx_bt_command) == 0)
+      if (strcmp(g_bt_command[i].command, (char*) g_bt_rx_command) == 0)
       {
          level_value                                     = (g_bt_command[i].value & 0xFFF);
          if ((g_bt_command[i].value & SERIAL_BT_COMMAND_DECREASE_FLAG) == 0)
@@ -233,10 +255,17 @@ uint8_t update_receiver_command(char* rx_bt_command)
 #define DSMS_22MS                                        0xA2                    // 2048
 #define DSMX_11MS                                        0xB2                    // 2048
 
+#if 1
+#define SPEKTRUM_CHANNEL_THROTTLE                        3
+#define SPEKTRUM_CHANNEL_AILERON                         0
+#define SPEKTRUM_CHANNEL_ELEVATOR                        1
+#define SPEKTRUM_CHANNEL_RUDDER                          2
+#else
 #define SPEKTRUM_CHANNEL_THROTTLE                        0
 #define SPEKTRUM_CHANNEL_AILERON                         1
 #define SPEKTRUM_CHANNEL_ELEVATOR                        2
 #define SPEKTRUM_CHANNEL_RUDDER                          3
+#endif
 #define SPEKTRUM_CHANNEL_GEAR                            4
 #define SPEKTRUM_CHANNEL_AUX_1                           5
 #define SPEKTRUM_CHANNEL_AUX_2                           6
@@ -261,16 +290,23 @@ typedef struct
 #define RX_PACKET_SPEKTRUM_CHANNEL_ID_5                  5
 #define RX_PACKET_SPEKTRUM_CHANNEL_ID_6                  6
 
+
+#define UART_RETRY_SEND_COUNT                            5
 uint8_t send_receiver_command()
 {
    RX_PACKET_SPEKTRUM_1024 packet;
+   uint8_t retry_count;
+   uint8_t* stream_packet                                = (uint8_t*) &packet;
+   int i;
    memset(&packet, 0, sizeof(RX_PACKET_SPEKTRUM_1024));
+
+   UNUSED_VARIABLE(retry_count);
+   UNUSED_VARIABLE(i);
 
    // missed frames for remote
    // always is null
    packet.fades                                          = 0;
-   // type of receiver
-   packet.system                                         = DSM2_22MS;
+   packet.system                                         = 0;
 
    // throttle (드론 상승, 하강)
    packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_0]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_THROTTLE << SPEKTRUM_1024_CHANNEL_SHIFT_BITS))       |
@@ -302,81 +338,28 @@ uint8_t send_receiver_command()
 #if 0
    {
       printf("\r\n");
-      printf("[%04x] ", packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_0]);
-      printf("[%04x] ", packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_1]);
-      printf("[%04x] ", packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_2]);
-      printf("[%04x] ", packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_3]);
-      printf("[%04x] ", packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_4]);
-      printf("[%04x] ", packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_5]);
-      printf("[%04x] ", packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6]);
-   }
+      for (i = 0; i < sizeof(RX_PACKET_SPEKTRUM_1024); i++)
+      {
+         printf("[%02x] ", *(stream_packet + i));
+      }
+  }
 #endif
 
 #if 1
-   // fades
-   while(app_uart_put(packet.fades) != NRF_SUCCESS)
+   __sd_nvic_irq_disable();
+   for (i = 0; i < sizeof(RX_PACKET_SPEKTRUM_1024); i++)
    {
+      retry_count                                        = 0;
+      while(app_uart_put(*(stream_packet + i)) != NRF_SUCCESS)
+      {
+         if (UART_RETRY_SEND_COUNT < retry_count++)
+         {
+            return 1;
+         }
+      }
+//      app_sleep();
    }
-   // system
-   while(app_uart_put(packet.system) != NRF_SUCCESS)
-   {
-   }
-   
-   // throttle
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_0] >> 8) & 0xFF)) != NRF_SUCCESS)
-   {
-   }
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_0]     ) & 0xFF)) != NRF_SUCCESS)
-   {
-   }
-
-   // aileron
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_1] >> 8) & 0xFF)) != NRF_SUCCESS)
-   {
-   }
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_1]     ) & 0xFF)) != NRF_SUCCESS)
-   {
-   }
-
-   // aileron
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_2] >> 8) & 0xFF)) != NRF_SUCCESS)
-   {
-   }
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_2]     ) & 0xFF)) != NRF_SUCCESS)
-   {
-   }
-
-   // rudder
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_3] >> 8) & 0xFF)) != NRF_SUCCESS)
-   {
-   }
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_3]     ) & 0xFF)) != NRF_SUCCESS)
-   {
-   }
-
-   // adc 1
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_4] >> 8) & 0xFF)) != NRF_SUCCESS)
-   {
-   }
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_4]     ) & 0xFF)) != NRF_SUCCESS)
-   {
-   }
-
-   // adc 2
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_5] >> 8) & 0xFF)) != NRF_SUCCESS)
-   {
-   }
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_5]     ) & 0xFF)) != NRF_SUCCESS)
-   {
-   }
-
-   // adc 3
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6] >> 8) & 0xFF)) != NRF_SUCCESS)
-   {
-   }
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6]     ) & 0xFF)) != NRF_SUCCESS)
-   {
-   }
+   __sd_nvic_irq_enable();
 #endif
 
 #if 0
@@ -644,8 +627,6 @@ uint8_t send_receiver_command()
 
 #endif
 
-static uint32_t g_prev_tick_count                        = 0;
-static uint32_t g_update_tick_count                      = 0;
 void serial_receiver_timer_handler(void * p_context)
 {
    uint32_t cur_tick_count                               = 0;
@@ -675,7 +656,7 @@ void serial_receiver_timer_handler(void * p_context)
    if (g_update_tick_count > SERIAL_RX_UPDATE_TICK_COUNT)
    {
       g_update_tick_count                                = 0;
-      send_receiver_command();
+      g_update_packet_complete                           = 1;
    }
 }
 
@@ -775,6 +756,20 @@ static void gap_params_init(void)
 static void nus_data_handler(ble_nus_t * p_nus, uint8_t * p_data, uint16_t length)
 {
 #if defined(SERIAL_RECEIVER)
+   if (g_bt_rx_command_complete == 0)
+   {
+      int copy_byte                                      = 0;
+
+      __sd_nvic_irq_disable();
+      memset(g_bt_rx_command, 0, (sizeof(uint8_t) * SERIAL_BT_COMMAND_MAX_SIZE));
+
+      copy_byte                                          = SERIAL_BT_COMMAND_MAX_SIZE > length ? length : SERIAL_BT_COMMAND_MAX_SIZE;
+      memcpy(g_bt_rx_command, p_data, copy_byte);
+      g_bt_rx_command_complete                           = 1;
+
+      __sd_nvic_irq_enable();
+   }
+#if 0
    char bt_rx_command[SERIAL_BT_COMMAND_MAX_SIZE + 1];
    if (length < SERIAL_BT_COMMAND_MAX_SIZE)
    {
@@ -782,6 +777,8 @@ static void nus_data_handler(ble_nus_t * p_nus, uint8_t * p_data, uint16_t lengt
       memcpy(bt_rx_command, p_data, length);
       update_receiver_command(bt_rx_command);
    }
+#endif
+
 #else
     for (uint32_t i = 0; i < length; i++)
     {
@@ -1118,7 +1115,11 @@ static void uart_init(void)
         TX_PIN_NUMBER,
         RTS_PIN_NUMBER,
         CTS_PIN_NUMBER,
+#if defined(SERIAL_RECEIVER)
+        APP_UART_FLOW_CONTROL_DISABLED,
+#else
         APP_UART_FLOW_CONTROL_ENABLED,
+#endif
         false,
 #if defined(SERIAL_RECEIVER)
         SERIAL_RX_BAUDRATE
@@ -1220,6 +1221,8 @@ int main(void)
 
 #if !defined(SERIAL_RECEIVER)
     printf("%s", start_string);
+#else
+    printf("program start \r\n ");
 #endif
     err_code = ble_advertising_start(BLE_ADV_MODE_FAST);
     APP_ERROR_CHECK(err_code);
@@ -1238,6 +1241,24 @@ int main(void)
     // Enter main loop.
     for (;;)
     {
+#if defined(SERIAL_RECEIVER)
+      if (g_bt_rx_command_complete != 0)
+      {
+         update_receiver_command();
+
+         __sd_nvic_irq_disable();
+         g_bt_rx_command_complete                        = 0;
+         __sd_nvic_irq_enable();
+      }
+      if (g_update_packet_complete != 0)
+      {
+         send_receiver_command();
+
+         __sd_nvic_irq_disable();
+         g_update_packet_complete                        = 0;
+         __sd_nvic_irq_enable();
+      }
+#endif
         power_manage();
     }
 }
