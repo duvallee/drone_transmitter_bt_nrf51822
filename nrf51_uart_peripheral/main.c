@@ -40,6 +40,15 @@
 
 
 #define SERIAL_RECEIVER
+#define WAVESHARE_BOARD
+
+#if defined(WAVESHARE_BOARD)
+#define WAVESHARE_LED_1                                  18
+#define WAVESHARE_LED_2                                  19
+#define WAVESHARE_LED_3                                  20
+#define WAVESHARE_LED_4                                  21
+#define WAVESHARE_LED_5                                  22
+#endif
 
 #if defined(SERIAL_RECEIVER)
 
@@ -58,15 +67,6 @@
 #define RX_CHANNEL_PITCH                                 1
 #define RX_CHANNEL_YAW                                   2
 #define RX_CHANNEL_THROTTLE                              3
-
-void app_sleep()
-{
-static int app_sleep_count                               = 100;
-   int i;
-   for (i = 0; i < app_sleep_count; i++)
-   {
-   }
-}
 
 #if defined(SERIAL_RX_SPEKTRUM_1024)
 
@@ -232,12 +232,14 @@ uint8_t update_receiver_command()
                g_rx_channel[g_bt_command[i].channel_id].value   = g_rx_channel[g_bt_command[i].channel_id].min;
             }
          }
+         nrf_gpio_pin_write(WAVESHARE_LED_4, 1);
 #if 0
          printf("%s = %d \r\n", g_bt_command[i].command, g_rx_channel[g_bt_command[i].channel_id].value);
 #endif
          return 0;
       }
    }
+   nrf_gpio_pin_write(WAVESHARE_LED_4, 0);
    return -1;
 }
 
@@ -346,7 +348,7 @@ uint8_t send_receiver_command()
 #endif
 
 #if 1
-   __sd_nvic_irq_disable();
+//   __sd_nvic_irq_disable();
    for (i = 0; i < sizeof(RX_PACKET_SPEKTRUM_1024); i++)
    {
       retry_count                                        = 0;
@@ -359,7 +361,7 @@ uint8_t send_receiver_command()
       }
 //      app_sleep();
    }
-   __sd_nvic_irq_enable();
+//   __sd_nvic_irq_enable();
 #endif
 
 #if 0
@@ -753,21 +755,29 @@ static void gap_params_init(void)
  * @param[in] length   Length of the data.
  */
 /**@snippet [Handling the data received over BLE] */
+int copy_byte                                            = 0;
 static void nus_data_handler(ble_nus_t * p_nus, uint8_t * p_data, uint16_t length)
 {
+   int i;
 #if defined(SERIAL_RECEIVER)
    if (g_bt_rx_command_complete == 0)
    {
-      int copy_byte                                      = 0;
+      nrf_gpio_pin_write(WAVESHARE_LED_3, 1);
+      for (i = 0; i < SERIAL_BT_COMMAND_MAX_SIZE; i++)
+      {
+         g_bt_rx_command[i]                              = 0;
+      }
 
-      __sd_nvic_irq_disable();
-      memset(g_bt_rx_command, 0, (sizeof(uint8_t) * SERIAL_BT_COMMAND_MAX_SIZE));
+//      memset(g_bt_rx_command, 0, (sizeof(uint8_t) * SERIAL_BT_COMMAND_MAX_SIZE));
 
       copy_byte                                          = SERIAL_BT_COMMAND_MAX_SIZE > length ? length : SERIAL_BT_COMMAND_MAX_SIZE;
-      memcpy(g_bt_rx_command, p_data, copy_byte);
+      for (i = 0; i < copy_byte; i++)
+      {
+         g_bt_rx_command[i]                              = *(p_data + i);
+      }
+//         memcpy(g_bt_rx_command, p_data, copy_byte);
       g_bt_rx_command_complete                           = 1;
-
-      __sd_nvic_irq_enable();
+      nrf_gpio_pin_write(WAVESHARE_LED_3, 0);
    }
 #if 0
    char bt_rx_command[SERIAL_BT_COMMAND_MAX_SIZE + 1];
@@ -1238,25 +1248,40 @@ int main(void)
    }
 #endif
 
+#if defined(WAVESHARE_BOARD)
+   nrf_gpio_cfg_output(WAVESHARE_LED_1);
+   nrf_gpio_cfg_output(WAVESHARE_LED_2);
+   nrf_gpio_cfg_output(WAVESHARE_LED_3);
+   nrf_gpio_cfg_output(WAVESHARE_LED_4);
+   nrf_gpio_cfg_output(WAVESHARE_LED_5);
+
+   nrf_gpio_pin_write(WAVESHARE_LED_1, 0);
+   nrf_gpio_pin_write(WAVESHARE_LED_2, 0);
+   nrf_gpio_pin_write(WAVESHARE_LED_3, 0);
+   nrf_gpio_pin_write(WAVESHARE_LED_4, 0);
+   nrf_gpio_pin_write(WAVESHARE_LED_5, 0);
+
+#endif
+
     // Enter main loop.
     for (;;)
     {
 #if defined(SERIAL_RECEIVER)
       if (g_bt_rx_command_complete != 0)
       {
+         nrf_gpio_pin_write(WAVESHARE_LED_1, 1);
          update_receiver_command();
 
-         __sd_nvic_irq_disable();
          g_bt_rx_command_complete                        = 0;
-         __sd_nvic_irq_enable();
+         nrf_gpio_pin_write(WAVESHARE_LED_1, 0);
       }
       if (g_update_packet_complete != 0)
       {
+         nrf_gpio_pin_write(WAVESHARE_LED_2, 1);
          send_receiver_command();
 
-         __sd_nvic_irq_disable();
          g_update_packet_complete                        = 0;
-         __sd_nvic_irq_enable();
+         nrf_gpio_pin_write(WAVESHARE_LED_2, 0);
       }
 #endif
         power_manage();
