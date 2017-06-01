@@ -67,6 +67,7 @@
 #define RX_CHANNEL_PITCH                                 1
 #define RX_CHANNEL_YAW                                   2
 #define RX_CHANNEL_THROTTLE                              3
+#define RX_CHANNEL_ARMING                                4
 
 #if defined(SERIAL_RX_SPEKTRUM_1024)
 
@@ -158,14 +159,6 @@ static uint32_t g_update_tick_count                      = 0;
 static uint8_t g_update_packet_complete                  = 0;
 // -----------------------------------------------------------------------------
 
-#define SERIAL_BT_COMMAND_DECREASE_FLAG                  0xF000
-typedef struct
-{
-   uint8_t channel_id;
-   uint16_t value;
-   char command[SERIAL_BT_COMMAND_MAX_SIZE];
-} SERIAL_BT_COMMAND;
-
 typedef struct
 {
    uint8_t channel_id;
@@ -175,72 +168,47 @@ typedef struct
    uint16_t value;
 } RX_CHANNEL;
 
-static SERIAL_BT_COMMAND g_bt_command[]                  =
-{
-   { RX_CHANNEL_ROLL,                                        1,      "ROLL-UP"},
-   { RX_CHANNEL_ROLL,     SERIAL_BT_COMMAND_DECREASE_FLAG |  1,      "ROLL-DOWN"},
-   { RX_CHANNEL_PITCH,                                       1,      "PITCH-UP"},
-   { RX_CHANNEL_PITCH,    SERIAL_BT_COMMAND_DECREASE_FLAG |  1,      "PITCH-DOWN"},
-   { RX_CHANNEL_YAW,                                         1,      "YAW-UP"},
-   { RX_CHANNEL_YAW,      SERIAL_BT_COMMAND_DECREASE_FLAG |  1,      "YAW-DOWN"},
-   { RX_CHANNEL_THROTTLE,                                    1,      "THROTTLE-UP"},
-   { RX_CHANNEL_THROTTLE,  SERIAL_BT_COMMAND_DECREASE_FLAG | 1,      "THROTTLE-DOWN"},
-};
-
 static RX_CHANNEL g_rx_channel[]                         =
 {
    { RX_CHANNEL_ROLL,         SERIAL_RX_ROLL_MIN,     SERIAL_RX_ROLL_MAX,     SERIAL_RX_ROLL_DEFAULT,       SERIAL_RX_ROLL_DEFAULT},
    { RX_CHANNEL_PITCH,        SERIAL_RX_PITCH_MIN,    SERIAL_RX_PITCH_MAX,    SERIAL_RX_PITCH_DEFAULT,      SERIAL_RX_PITCH_DEFAULT},
    { RX_CHANNEL_YAW,          SERIAL_RX_YAW_MIN,      SERIAL_RX_YAW_MAX,      SERIAL_RX_YAW_DEFAULT,        SERIAL_RX_YAW_DEFAULT},
    { RX_CHANNEL_THROTTLE,     SERIAL_RX_THROTTLE_MIN, SERIAL_RX_THROTTLE_MAX, SERIAL_RX_THROTTLE_DEFAULT,   SERIAL_RX_THROTTLE_DEFAULT},
+   { RX_CHANNEL_ARMING,       0,                      1023,                   0,                            0},
 };
 
 uint8_t update_receiver_command()
 {
-   uint8_t i                                             = 0;
-   uint16_t level_value                                  = 0;
-   uint8_t max_command                                   = sizeof(g_bt_command) / sizeof(SERIAL_BT_COMMAND);
+static uint8_t debug_led                                 = 0;
+   uint16_t header                                       = (g_bt_rx_command[0] << 8) | g_bt_rx_command[1];
 
-   for (i = 0; i < max_command; i++)
+   if (header != 0x2392)
    {
-      if (strcmp(g_bt_command[i].command, (char*) g_bt_rx_command) == 0)
-      {
-         level_value                                     = (g_bt_command[i].value & 0xFFF);
-         if ((g_bt_command[i].value & SERIAL_BT_COMMAND_DECREASE_FLAG) == 0)
-         {
-            if ((g_rx_channel[g_bt_command[i].channel_id].value + level_value) > g_rx_channel[g_bt_command[i].channel_id].max)
-            {
-               g_rx_channel[g_bt_command[i].channel_id].value   = g_rx_channel[g_bt_command[i].channel_id].max;
-            }
-            else
-            {
-               g_rx_channel[g_bt_command[i].channel_id].value  += level_value;
-            }
-         }
-         else
-         {
-            if ((g_rx_channel[g_bt_command[i].channel_id].value - level_value) <= g_rx_channel[g_bt_command[i].channel_id].min)
-            {
-               g_rx_channel[g_bt_command[i].channel_id].value   = g_rx_channel[g_bt_command[i].channel_id].min;
-            }
-            else
-            {
-               g_rx_channel[g_bt_command[i].channel_id].value  -= level_value;
-            }
-            if (g_rx_channel[g_bt_command[i].channel_id].value > g_rx_channel[g_bt_command[i].channel_id].max)
-            {
-               g_rx_channel[g_bt_command[i].channel_id].value   = g_rx_channel[g_bt_command[i].channel_id].min;
-            }
-         }
-         nrf_gpio_pin_write(WAVESHARE_LED_4, 1);
-#if 0
-         printf("%s = %d \r\n", g_bt_command[i].command, g_rx_channel[g_bt_command[i].channel_id].value);
-#endif
-         return 0;
-      }
+      nrf_gpio_pin_write(WAVESHARE_LED_1, 1);
+      return -1;
    }
-   nrf_gpio_pin_write(WAVESHARE_LED_4, 0);
-   return -1;
+   
+   g_rx_channel[RX_CHANNEL_ROLL].value                   = (g_bt_rx_command[2] << 8) | g_bt_rx_command[3];
+   g_rx_channel[RX_CHANNEL_PITCH].value                  = (g_bt_rx_command[4] << 8) | g_bt_rx_command[5];
+   g_rx_channel[RX_CHANNEL_YAW].value                    = (g_bt_rx_command[6] << 8) | g_bt_rx_command[7];
+   g_rx_channel[RX_CHANNEL_THROTTLE].value               = (g_bt_rx_command[8] << 8) | g_bt_rx_command[9];
+   g_rx_channel[RX_CHANNEL_ARMING].value                 = (g_bt_rx_command[10] << 8) | g_bt_rx_command[11];
+
+   if (g_rx_channel[RX_CHANNEL_ARMING].value != 0)
+   {
+      g_rx_channel[RX_CHANNEL_ARMING].value              = 1023;
+   }
+
+   if (debug_led == 0)
+   {
+      debug_led                                          = 1;
+   }
+   else
+   {
+      debug_led                                          = 0;
+   }
+   nrf_gpio_pin_write(WAVESHARE_LED_2, debug_led);
+   return 0;
 }
 
 #if defined(SERIAL_RX_SPEKTRUM_1024)
@@ -328,7 +296,7 @@ uint8_t send_receiver_command()
 
    // GEAR
    packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_4]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_GEAR << SPEKTRUM_1024_CHANNEL_SHIFT_BITS))           |
-                                                           (0x200 & MASK_1024_SXPOS);
+                                                           (g_rx_channel[RX_CHANNEL_ARMING].value & MASK_1024_SXPOS);
    // ADC 1
    packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_5]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_AUX_2 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS))          |
                                                            (0x200 & MASK_1024_SXPOS);
@@ -336,6 +304,24 @@ uint8_t send_receiver_command()
    // ADC 2
    packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_AUX_3 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS))          |
                                                            (0x200 & MASK_1024_SXPOS);
+
+   static uint8_t debug_count                            = 0;
+   static uint8_t led_count                              = 0;
+   ++debug_count;
+
+   if ((debug_count % 100) == 0)
+   {
+      debug_count                                        = 0;
+      if (led_count == 0)
+      {
+         led_count                                       = 1;
+      }
+      else
+      {
+         led_count                                       = 0;
+      }
+      nrf_gpio_pin_write(WAVESHARE_LED_3, led_count);
+   }
 
 #if 0
    {
@@ -348,7 +334,6 @@ uint8_t send_receiver_command()
 #endif
 
 #if 1
-//   __sd_nvic_irq_disable();
    for (i = 0; i < sizeof(RX_PACKET_SPEKTRUM_1024); i++)
    {
       retry_count                                        = 0;
@@ -359,9 +344,7 @@ uint8_t send_receiver_command()
             return 1;
          }
       }
-//      app_sleep();
    }
-//   __sd_nvic_irq_enable();
 #endif
 
 #if 0
@@ -759,25 +742,22 @@ int copy_byte                                            = 0;
 static void nus_data_handler(ble_nus_t * p_nus, uint8_t * p_data, uint16_t length)
 {
    int i;
+
 #if defined(SERIAL_RECEIVER)
    if (g_bt_rx_command_complete == 0)
    {
-      nrf_gpio_pin_write(WAVESHARE_LED_3, 1);
       for (i = 0; i < SERIAL_BT_COMMAND_MAX_SIZE; i++)
       {
          g_bt_rx_command[i]                              = 0;
       }
-
-//      memset(g_bt_rx_command, 0, (sizeof(uint8_t) * SERIAL_BT_COMMAND_MAX_SIZE));
 
       copy_byte                                          = SERIAL_BT_COMMAND_MAX_SIZE > length ? length : SERIAL_BT_COMMAND_MAX_SIZE;
       for (i = 0; i < copy_byte; i++)
       {
          g_bt_rx_command[i]                              = *(p_data + i);
       }
-//         memcpy(g_bt_rx_command, p_data, copy_byte);
+
       g_bt_rx_command_complete                           = 1;
-      nrf_gpio_pin_write(WAVESHARE_LED_3, 0);
    }
 #if 0
    char bt_rx_command[SERIAL_BT_COMMAND_MAX_SIZE + 1];
@@ -1269,19 +1249,15 @@ int main(void)
 #if defined(SERIAL_RECEIVER)
       if (g_bt_rx_command_complete != 0)
       {
-         nrf_gpio_pin_write(WAVESHARE_LED_1, 1);
          update_receiver_command();
 
          g_bt_rx_command_complete                        = 0;
-         nrf_gpio_pin_write(WAVESHARE_LED_1, 0);
       }
       if (g_update_packet_complete != 0)
       {
-         nrf_gpio_pin_write(WAVESHARE_LED_2, 1);
          send_receiver_command();
 
          g_update_packet_complete                        = 0;
-         nrf_gpio_pin_write(WAVESHARE_LED_2, 0);
       }
 #endif
         power_manage();
