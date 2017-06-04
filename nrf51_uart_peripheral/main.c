@@ -190,8 +190,8 @@ static uint8_t debug_led                                 = 0;
    
    g_rx_channel[RX_CHANNEL_ROLL].value                   = (g_bt_rx_command[2] << 8) | g_bt_rx_command[3];
    g_rx_channel[RX_CHANNEL_PITCH].value                  = (g_bt_rx_command[4] << 8) | g_bt_rx_command[5];
-   g_rx_channel[RX_CHANNEL_YAW].value                    = (g_bt_rx_command[6] << 8) | g_bt_rx_command[7];
-   g_rx_channel[RX_CHANNEL_THROTTLE].value               = (g_bt_rx_command[8] << 8) | g_bt_rx_command[9];
+   g_rx_channel[RX_CHANNEL_THROTTLE].value               = (g_bt_rx_command[6] << 8) | g_bt_rx_command[7];
+   g_rx_channel[RX_CHANNEL_YAW].value                    = (g_bt_rx_command[8] << 8) | g_bt_rx_command[9];
    g_rx_channel[RX_CHANNEL_ARMING].value                 = (g_bt_rx_command[10] << 8) | g_bt_rx_command[11];
 
    if (g_rx_channel[RX_CHANNEL_ARMING].value != 0)
@@ -334,6 +334,143 @@ uint8_t send_receiver_command()
 #endif
 
 #if 1
+      retry_count                                        = 0;
+      while(app_uart_put(*(stream_packet + 1)) != NRF_SUCCESS)
+      {
+         if (UART_RETRY_SEND_COUNT < retry_count++)
+         {
+            return 1;
+         }
+      }
+      retry_count                                        = 0;
+      while(app_uart_put(*(stream_packet + 0)) != NRF_SUCCESS)
+      {
+         if (UART_RETRY_SEND_COUNT < retry_count++)
+         {
+            return 1;
+         }
+      }
+
+      retry_count                                        = 0;
+      while(app_uart_put(*(stream_packet + 3)) != NRF_SUCCESS)
+      {
+         if (UART_RETRY_SEND_COUNT < retry_count++)
+         {
+            return 1;
+         }
+      }
+      retry_count                                        = 0;
+      while(app_uart_put(*(stream_packet + 2)) != NRF_SUCCESS)
+      {
+         if (UART_RETRY_SEND_COUNT < retry_count++)
+         {
+            return 1;
+         }
+      }
+
+      retry_count                                        = 0;
+      while(app_uart_put(*(stream_packet + 5)) != NRF_SUCCESS)
+      {
+         if (UART_RETRY_SEND_COUNT < retry_count++)
+         {
+            return 1;
+         }
+      }
+      retry_count                                        = 0;
+      while(app_uart_put(*(stream_packet + 4)) != NRF_SUCCESS)
+      {
+         if (UART_RETRY_SEND_COUNT < retry_count++)
+         {
+            return 1;
+         }
+      }
+
+      retry_count                                        = 0;
+      while(app_uart_put(*(stream_packet + 7)) != NRF_SUCCESS)
+      {
+         if (UART_RETRY_SEND_COUNT < retry_count++)
+         {
+            return 1;
+         }
+      }
+      retry_count                                        = 0;
+      while(app_uart_put(*(stream_packet + 6)) != NRF_SUCCESS)
+      {
+         if (UART_RETRY_SEND_COUNT < retry_count++)
+         {
+            return 1;
+         }
+      }
+
+      retry_count                                        = 0;
+      while(app_uart_put(*(stream_packet + 9)) != NRF_SUCCESS)
+      {
+         if (UART_RETRY_SEND_COUNT < retry_count++)
+         {
+            return 1;
+         }
+      }
+      retry_count                                        = 0;
+      while(app_uart_put(*(stream_packet + 8)) != NRF_SUCCESS)
+      {
+         if (UART_RETRY_SEND_COUNT < retry_count++)
+         {
+            return 1;
+         }
+      }
+
+      retry_count                                        = 0;
+      while(app_uart_put(*(stream_packet + 11)) != NRF_SUCCESS)
+      {
+         if (UART_RETRY_SEND_COUNT < retry_count++)
+         {
+            return 1;
+         }
+      }
+      retry_count                                        = 0;
+      while(app_uart_put(*(stream_packet + 10)) != NRF_SUCCESS)
+      {
+         if (UART_RETRY_SEND_COUNT < retry_count++)
+         {
+            return 1;
+         }
+      }
+
+      retry_count                                        = 0;
+      while(app_uart_put(*(stream_packet + 13)) != NRF_SUCCESS)
+      {
+         if (UART_RETRY_SEND_COUNT < retry_count++)
+         {
+            return 1;
+         }
+      }
+      retry_count                                        = 0;
+      while(app_uart_put(*(stream_packet + 12)) != NRF_SUCCESS)
+      {
+         if (UART_RETRY_SEND_COUNT < retry_count++)
+         {
+            return 1;
+         }
+      }
+
+      retry_count                                        = 0;
+      while(app_uart_put(*(stream_packet + 15)) != NRF_SUCCESS)
+      {
+         if (UART_RETRY_SEND_COUNT < retry_count++)
+         {
+            return 1;
+         }
+      }
+      retry_count                                        = 0;
+      while(app_uart_put(*(stream_packet + 14)) != NRF_SUCCESS)
+      {
+         if (UART_RETRY_SEND_COUNT < retry_count++)
+         {
+            return 1;
+         }
+      }
+
+#else
    for (i = 0; i < sizeof(RX_PACKET_SPEKTRUM_1024); i++)
    {
       retry_count                                        = 0;
