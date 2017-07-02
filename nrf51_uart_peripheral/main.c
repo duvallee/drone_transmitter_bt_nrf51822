@@ -50,6 +50,41 @@
 #define WAVESHARE_LED_5                                  22
 #endif
 
+#if 1
+#define IS_SRVC_CHANGED_CHARACT_PRESENT 0                                           /**< Include the service_changed characteristic. If not enabled, the server's database cannot be changed for the lifetime of the device. */
+
+#define CENTRAL_LINK_COUNT              0                                           /**< Number of central links used by the application. When changing this number remember to adjust the RAM settings*/
+#define PERIPHERAL_LINK_COUNT           1                                           /**< Number of peripheral links used by the application. When changing this number remember to adjust the RAM settings*/
+
+#define NUS_SERVICE_UUID_TYPE           BLE_UUID_TYPE_VENDOR_BEGIN                  /**< UUID type for the Nordic UART Service (vendor specific). */
+
+#define APP_ADV_INTERVAL                64                                          /**< The advertising interval (in units of 0.625 ms. This value corresponds to 40 ms). */
+#define APP_ADV_TIMEOUT_IN_SECONDS      180                                         /**< The advertising timeout (in units of seconds). */
+
+#define APP_TIMER_PRESCALER             0                                           /**< Value of the RTC1 PRESCALER register. */
+#define APP_TIMER_OP_QUEUE_SIZE         4                                           /**< Size of timer operation queues. */
+
+#define MIN_CONN_INTERVAL               MSEC_TO_UNITS(20, UNIT_1_25_MS)             /**< Minimum acceptable connection interval (20 ms), Connection interval uses 1.25 ms units. */
+#define MAX_CONN_INTERVAL               MSEC_TO_UNITS(75, UNIT_1_25_MS)             /**< Maximum acceptable connection interval (75 ms), Connection interval uses 1.25 ms units. */
+#define SLAVE_LATENCY                   0                                           /**< Slave latency. */
+#define CONN_SUP_TIMEOUT                MSEC_TO_UNITS(4000, UNIT_10_MS)             /**< Connection supervisory timeout (4 seconds), Supervision Timeout uses 10 ms units. */
+#define FIRST_CONN_PARAMS_UPDATE_DELAY  APP_TIMER_TICKS(5000, APP_TIMER_PRESCALER)  /**< Time from initiating event (connect or start of notification) to first time sd_ble_gap_conn_param_update is called (5 seconds). */
+#define NEXT_CONN_PARAMS_UPDATE_DELAY   APP_TIMER_TICKS(30000, APP_TIMER_PRESCALER) /**< Time between each call to sd_ble_gap_conn_param_update after the first call (30 seconds). */
+#define MAX_CONN_PARAMS_UPDATE_COUNT    3                                           /**< Number of attempts before giving up the connection parameter negotiation. */
+
+#define START_STRING                                     "Start...\r\n"
+
+#define DEAD_BEEF                       0xDEADBEEF                                  /**< Value used as error code on stack dump, can be used to identify stack location on stack unwind. */
+
+#define UART_TX_BUF_SIZE                256                                         /**< UART TX buffer size. */
+#define UART_RX_BUF_SIZE                256                                         /**< UART RX buffer size. */
+
+static ble_nus_t                        m_nus;                                      /**< Structure to identify the Nordic UART Service. */
+static uint16_t                         m_conn_handle = BLE_CONN_HANDLE_INVALID;    /**< Handle of the current connection. */
+
+static ble_uuid_t                       m_adv_uuids[] = {{BLE_UUID_NUS_SERVICE, NUS_SERVICE_UUID_TYPE}};  /**< Universally unique service identifier. */
+#endif
+
 #if defined(SERIAL_RECEIVER)
 
 // receiver type
@@ -151,6 +186,41 @@
 #define SERIAL_BT_COMMAND_MAX_SIZE                       32
 static uint8_t g_bt_rx_command[SERIAL_BT_COMMAND_MAX_SIZE];
 
+typedef struct _BT_PROTOCOL_DATA
+{
+   uint8_t version_high;
+   uint8_t version_low;
+   uint8_t command;
+   uint8_t size;
+   uint16_t channel_1;                                   // ROLL
+   uint16_t channel_2;                                   // PITCH
+   uint16_t channel_3;                                   // YAW
+   uint16_t channel_4;                                   // THROTTLE
+   uint16_t channel_5;                                   // GEAR
+   uint16_t channel_6;                                   // AUX_1
+   uint16_t channel_7;                                   // AUX_2
+   uint16_t channel_8;                                   // AUX_3
+   uint16_t channel_9;                                   // AUX_4
+   uint16_t channel_10;                                  // AUX_5
+   uint16_t channel_11;                                  // AUX_6
+   uint16_t channel_12;                                  // AUX_7
+   uint16_t crc;                                         // CRC
+} __attribute__ ((__packed__)) BT_PROTOCOL_DATA;
+
+typedef struct _BT_PROTOCOL_RESPONSE
+{
+   uint8_t version_high;
+   uint8_t version_low;
+   uint8_t command;
+   uint8_t size;
+   uint16_t status;
+   uint16_t crc;                                         // CRC
+} __attribute__ ((__packed__)) BT_PROTOCOL_RESPONSE;
+
+#define  PROTOCOL_SEND_TO_TRANSMITTER                    0x01
+#define  PROTOCOL_RESPONSE_FROM_TRANSMITTER              0x02
+#define  PROTOCOL_ALIVE_FROM_TRANSMITTER                 0x03
+
 static uint8_t g_bt_rx_command_complete                  = 0;
 
 static uint32_t g_prev_tick_count                        = 0;
@@ -177,6 +247,35 @@ static RX_CHANNEL g_rx_channel[]                         =
    { RX_CHANNEL_ARMING,       0,                      1023,                   0,                            0},
 };
 
+#if 1
+
+// #define  PROTOCOL_SEND_TO_TRANSMITTER                    0x01
+// #define  PROTOCOL_RESPONSE_FROM_TRANSMITTER              0x02
+// #define  PROTOCOL_ALIVE_FROM_TRANSMITTER                 0x03
+
+uint8_t update_receiver_command()
+{
+   uint32_t err_code;
+   BT_PROTOCOL_DATA* pProtocolData                          = (BT_PROTOCOL_DATA*) g_bt_rx_command;
+   BT_PROTOCOL_RESPONSE reponse;
+
+   reponse.version_high                                     = pProtocolData->version_high;
+   reponse.version_low                                      = pProtocolData->version_low;
+   reponse.command                                          = PROTOCOL_RESPONSE_FROM_TRANSMITTER;
+   reponse.size                                             = sizeof(BT_PROTOCOL_RESPONSE);
+   reponse.status                                           = 0;
+   reponse.crc                                              = pProtocolData->crc;
+
+   err_code                                                 = ble_nus_string_send(&m_nus, (uint8_t *) &reponse, sizeof(BT_PROTOCOL_RESPONSE));
+//   err_code                                                 = ble_nus_string_send(&m_nus, (uint8_t *) "test data   ", 9);
+   if (err_code != NRF_ERROR_INVALID_STATE)
+   {
+      APP_ERROR_CHECK(err_code);
+   }
+
+   return 0;
+}
+#else
 uint8_t update_receiver_command()
 {
 static uint8_t debug_led                                 = 0;
@@ -210,7 +309,7 @@ static uint8_t debug_led                                 = 0;
    nrf_gpio_pin_write(WAVESHARE_LED_2, debug_led);
    return 0;
 }
-
+#endif
 #if defined(SERIAL_RX_SPEKTRUM_1024)
 
 #define MASK_1024_CHANID                                 0xFC00
@@ -784,6 +883,7 @@ void serial_receiver_timer_handler(void * p_context)
 
 #endif   // SERIAL_RECEIVER
 
+#if 0
 #define IS_SRVC_CHANGED_CHARACT_PRESENT 0                                           /**< Include the service_changed characteristic. If not enabled, the server's database cannot be changed for the lifetime of the device. */
 
 #define CENTRAL_LINK_COUNT              0                                           /**< Number of central links used by the application. When changing this number remember to adjust the RAM settings*/
@@ -816,7 +916,7 @@ static ble_nus_t                        m_nus;                                  
 static uint16_t                         m_conn_handle = BLE_CONN_HANDLE_INVALID;    /**< Handle of the current connection. */
 
 static ble_uuid_t                       m_adv_uuids[] = {{BLE_UUID_NUS_SERVICE, NUS_SERVICE_UUID_TYPE}};  /**< Universally unique service identifier. */
-
+#endif
 
 /**@brief Function for assert macro callback.
  *
