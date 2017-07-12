@@ -38,10 +38,13 @@
 #include "bsp.h"
 #include "bsp_btn_ble.h"
 
-
+// -----------------------------------------------------------------------------
+// for global definition
 #define SERIAL_RECEIVER
 #define WAVESHARE_BOARD
 
+// -----------------------------------------------------------------------------
+// for debugging...
 #if defined(WAVESHARE_BOARD)
 #define WAVESHARE_LED_1                                  18
 #define WAVESHARE_LED_2                                  19
@@ -50,46 +53,355 @@
 #define WAVESHARE_LED_5                                  22
 #endif
 
-#if 1
-#define IS_SRVC_CHANGED_CHARACT_PRESENT 0                                           /**< Include the service_changed characteristic. If not enabled, the server's database cannot be changed for the lifetime of the device. */
+// -----------------------------------------------------------------------------
+// for serial rx transmitter
+#define SERIAL_RX_TRANSMITTER_MAX_SIZE                   64
 
-#define CENTRAL_LINK_COUNT              0                                           /**< Number of central links used by the application. When changing this number remember to adjust the RAM settings*/
-#define PERIPHERAL_LINK_COUNT           1                                           /**< Number of peripheral links used by the application. When changing this number remember to adjust the RAM settings*/
+// -----------------------------------------------------------------------------
+// protocol for phone and bt's receiver
+#define PROTOCOL_BASIC_MAX_SIZE                          8
+#define PROTOCOL_CHANNEL_MAX_SIZE                        32
 
-#define NUS_SERVICE_UUID_TYPE           BLE_UUID_TYPE_VENDOR_BEGIN                  /**< UUID type for the Nordic UART Service (vendor specific). */
+#define PROTOCOL_HEADER_HIGH_VERSION                     0x10
+#define PROTOCOL_HEADER_LOW_VERSION                      0x01
 
-#define APP_ADV_INTERVAL                64                                          /**< The advertising interval (in units of 0.625 ms. This value corresponds to 40 ms). */
-#define APP_ADV_TIMEOUT_IN_SECONDS      180                                         /**< The advertising timeout (in units of seconds). */
+// Command (byte : 4 bit (phone -> transmitter : 0x0?, transmitter -> phone : 0xF?)
+#define PROTOCOL_REGISTER_MESSAGE                        0x01
+#define PROTOCOL_REGISTER_RESPONSE                       0xF1
+#define PROTOCOL_ALIVE_MESSAGE                           0x02
+#define PROTOCOL_ALIVE_RESPONSE                          0xF2
+#define PROTOCOL_CHANNEL_MESSAGE                         0x03
+#define PROTOCOL_CHANNEL_RESPONSE                        0xF3
 
-#define APP_TIMER_PRESCALER             0                                           /**< Value of the RTC1 PRESCALER register. */
-#define APP_TIMER_OP_QUEUE_SIZE         4                                           /**< Size of timer operation queues. */
+// channel id
+// if it need modified id of channel, must be changed in the android.
+#define SPEKTRUM_CHANNEL_ROLL                            0
+#define SPEKTRUM_CHANNEL_PITCH                           1
+#define SPEKTRUM_CHANNEL_YAW                             2
+#define SPEKTRUM_CHANNEL_THROTTLE                        3
+#define SPEKTRUM_CHANNEL_GEAR                            4
+#define SPEKTRUM_CHANNEL_AUX_1                           5
+#define SPEKTRUM_CHANNEL_AUX_2                           6
+#define SPEKTRUM_CHANNEL_AUX_3                           7
+#define SPEKTRUM_CHANNEL_AUX_4                           8
+#define SPEKTRUM_CHANNEL_AUX_5                           9
+#define SPEKTRUM_CHANNEL_AUX_6                           10
+#define SPEKTRUM_CHANNEL_AUX_7                           11
+#define SPEKTRUM_MAX_CHANNEL                             12
 
-#define MIN_CONN_INTERVAL               MSEC_TO_UNITS(20, UNIT_1_25_MS)             /**< Minimum acceptable connection interval (20 ms), Connection interval uses 1.25 ms units. */
-#define MAX_CONN_INTERVAL               MSEC_TO_UNITS(75, UNIT_1_25_MS)             /**< Maximum acceptable connection interval (75 ms), Connection interval uses 1.25 ms units. */
-#define SLAVE_LATENCY                   0                                           /**< Slave latency. */
-#define CONN_SUP_TIMEOUT                MSEC_TO_UNITS(4000, UNIT_10_MS)             /**< Connection supervisory timeout (4 seconds), Supervision Timeout uses 10 ms units. */
-#define FIRST_CONN_PARAMS_UPDATE_DELAY  APP_TIMER_TICKS(5000, APP_TIMER_PRESCALER)  /**< Time from initiating event (connect or start of notification) to first time sd_ble_gap_conn_param_update is called (5 seconds). */
-#define NEXT_CONN_PARAMS_UPDATE_DELAY   APP_TIMER_TICKS(30000, APP_TIMER_PRESCALER) /**< Time between each call to sd_ble_gap_conn_param_update after the first call (30 seconds). */
-#define MAX_CONN_PARAMS_UPDATE_COUNT    3                                           /**< Number of attempts before giving up the connection parameter negotiation. */
+
+// command & response
+typedef struct _BT_PROTOCOL_COMMAND
+{
+   // 4 bytes
+   uint8_t version_high;
+   uint8_t version_low;
+   uint8_t command;
+   uint8_t size;
+
+   // 4 bytes
+   uint8_t option_1_high;
+   uint8_t option_1_low;
+   uint8_t option_2_high;
+   uint8_t option_2_low;
+} __attribute__ ((__packed__)) BT_PROTOCOL_COMMAND;
+
+// channel
+typedef struct _BT_PROTOCOL_CHANNEL_DATA
+{
+   // 8 bytes
+   BT_PROTOCOL_COMMAND base_protocol;
+
+   // 4 bytes
+   uint16_t channel_1;                                   // ROLL
+   uint16_t channel_2;                                   // PITCH
+
+   // 4 bytes
+   uint16_t channel_3;                                   // YAW
+   uint16_t channel_4;                                   // THROTTLE
+
+   // 4 bytes
+   uint16_t channel_5;                                   // GEAR (Armming)
+   uint16_t channel_6;                                   // AUX_1
+
+   // 4 bytes
+   uint16_t channel_7;                                   // AUX_2
+   uint16_t channel_8;                                   // AUX_3
+
+   // 4 bytes
+   uint16_t channel_9;                                   // AUX_4
+   uint16_t channel_10;                                  // AUX_5
+
+   // 4 bytes
+   uint16_t channel_11;                                  // AUX_6
+   uint16_t channel_12;                                  // AUX_7
+} __attribute__ ((__packed__)) BT_PROTOCOL_DATA;
+
+// -----------------------------------------------------------------------------
+enum BT_COMMAND_STATUS
+{
+   BT_COMMAND_READY                                      = 0,
+   BT_COMMAND_RECEIVED                                   = 1,
+   BT_COMMAND_PROCESS                                    = 3,
+};
+
+// -----------------------------------------------------------------------------
+enum PROJECT_MODE
+{
+   PROJECT_INIT_STATUS                                   = 0,
+   PROJECT_READY_STATUS                                  = 1,
+   PROJECT_NORMAL_STATUS                                 = 2,
+   PROJECT_FAILSAFE_STATUS                               = 3,
+   
+   PROJECT_FAILED                                        = -1,
+};
+
+// -----------------------------------------------------------------------------
+enum RESPONSE_ERROR_CODE
+{
+   SUCCESS_RESPONSE                                      = 0,
+   ERROR_RESPONSE_VERSION                                = 1,
+   ERROR_RESPONSE_CRC_ERROR                              = 2,
+   ERROR_RESPONSE_CHANNEL_FAILED                         = 3,
+};
+
+// -----------------------------------------------------------------------------
+// for timer
+#define MAX_TIMER_COUNT                                  10
+typedef void (*TIMER_FN)(void*);
+typedef struct _TIMER
+{
+   uint32_t tick_count;
+
+   uint32_t ms_elapse;
+   int call_count;
+   int call_fn_count;
+
+   TIMER_FN fn_timer;
+
+   void* pData;
+} TIMER;
+
+
+// -----------------------------------------------------------------------------
+// for project
+typedef struct _PROJECT
+{
+   // remote controller status
+   uint8_t mode;
+   // timer tick count
+   uint32_t tick_count;
+
+   // check alive
+   uint32_t last_alive_tick_count;
+
+   // for remote controller
+   uint8_t serial_tx_buffer[SERIAL_RX_TRANSMITTER_MAX_SIZE];
+
+   // for receive data from bt
+   uint8_t bt_rx_buffer[PROTOCOL_CHANNEL_MAX_SIZE];
+   uint8_t received_rx_length;
+   uint32_t received_drop_frame_cout;
+
+   // for transmit data to bt
+   uint8_t bt_tx_buffer[PROTOCOL_BASIC_MAX_SIZE];
+   uint8_t parsing_status;
+   uint16_t parsing_result_code;
+
+   TIMER timer[MAX_TIMER_COUNT];
+
+} PROJECT;
+
+#define RTC_HZ_FOR_TICK_COUNT                            32768
+#define MILLI_SECOND                                     1000
+
+#define MILLI_SECOND_TO_TICK_COUNT(ms)                   ((RTC_HZ_FOR_TICK_COUNT * ms) / MILLI_SECOND)
+#define SECOND_TO_TICK_COUNT(s)                          (RTC_HZ_FOR_TICK_COUNT * s)
+#define TICK_COUNT_TO_MILLI_SECOND(count)                ((count * MILLI_SECOND) / RTC_HZ_FOR_TICK_COUNT)
+#define TICK_COUNT_TO_SECOND(count)                      (count * MILLI_SECOND / RTC_HZ_FOR_TICK_COUNT)
+
+// -----------------------------------------------------------------------------
+static PROJECT gProject[1]                               =
+{
+   {
+      .mode                                              = PROJECT_INIT_STATUS,
+   },
+};
+
+
+// -----------------------------------------------------------------------------
+// for failsafe mode
+
+typedef struct
+{
+   uint8_t channel_id;
+   uint16_t value;
+} FAILSAFE_MODE_VALUE;
+
+static FAILSAFE_MODE_VALUE g_failsafe_value[SPEKTRUM_MAX_CHANNEL] =
+{
+   { SPEKTRUM_CHANNEL_ROLL,      512},
+   { SPEKTRUM_CHANNEL_PITCH,     512},
+   { SPEKTRUM_CHANNEL_YAW,       512},
+   { SPEKTRUM_CHANNEL_THROTTLE,  100},
+   { SPEKTRUM_CHANNEL_GEAR,      100},
+   { SPEKTRUM_CHANNEL_AUX_1,     512},
+   { SPEKTRUM_CHANNEL_AUX_2,     512},
+   { SPEKTRUM_CHANNEL_AUX_3,     512},
+   { SPEKTRUM_CHANNEL_AUX_4,     512},
+   { SPEKTRUM_CHANNEL_AUX_5,     512},
+   { SPEKTRUM_CHANNEL_AUX_6,     512},
+   { SPEKTRUM_CHANNEL_AUX_7,     512},
+};
+
+
+// -----------------------------------------------------------------------------
+// ...
+#define IS_SRVC_CHANGED_CHARACT_PRESENT                  0                       /**< Include the service_changed characteristic. If not enabled, the server's database cannot be changed for the lifetime of the device. */
+
+#define CENTRAL_LINK_COUNT                               0                       /**< Number of central links used by the application. When changing this number remember to adjust the RAM settings*/
+#define PERIPHERAL_LINK_COUNT                            1                       /**< Number of peripheral links used by the application. When changing this number remember to adjust the RAM settings*/
+
+#define NUS_SERVICE_UUID_TYPE                            BLE_UUID_TYPE_VENDOR_BEGIN /**< UUID type for the Nordic UART Service (vendor specific). */
+
+#define APP_ADV_INTERVAL                                 64                      /**< The advertising interval (in units of 0.625 ms. This value corresponds to 40 ms). */
+#define APP_ADV_TIMEOUT_IN_SECONDS                       180                     /**< The advertising timeout (in units of seconds). */
+
+#define APP_TIMER_PRESCALER                              0                       /**< Value of the RTC1 PRESCALER register. */
+#define APP_TIMER_OP_QUEUE_SIZE                          4                       /**< Size of timer operation queues. */
+
+#define MIN_CONN_INTERVAL                                MSEC_TO_UNITS(20, UNIT_1_25_MS)  /**< Minimum acceptable connection interval (20 ms), Connection interval uses 1.25 ms units. */
+#define MAX_CONN_INTERVAL                                MSEC_TO_UNITS(75, UNIT_1_25_MS)  /**< Maximum acceptable connection interval (75 ms), Connection interval uses 1.25 ms units. */
+#define SLAVE_LATENCY                                    0                       /**< Slave latency. */
+#define CONN_SUP_TIMEOUT                                 MSEC_TO_UNITS(4000, UNIT_10_MS)  /**< Connection supervisory timeout (4 seconds), Supervision Timeout uses 10 ms units. */
+#define FIRST_CONN_PARAMS_UPDATE_DELAY                   APP_TIMER_TICKS(5000, APP_TIMER_PRESCALER)   /**< Time from initiating event (connect or start of notification) to first time sd_ble_gap_conn_param_update is called (5 seconds). */
+#define NEXT_CONN_PARAMS_UPDATE_DELAY                    APP_TIMER_TICKS(30000, APP_TIMER_PRESCALER)  /**< Time between each call to sd_ble_gap_conn_param_update after the first call (30 seconds). */
+#define MAX_CONN_PARAMS_UPDATE_COUNT                     3                       /**< Number of attempts before giving up the connection parameter negotiation. */
 
 #define START_STRING                                     "Start...\r\n"
 
-#define DEAD_BEEF                       0xDEADBEEF                                  /**< Value used as error code on stack dump, can be used to identify stack location on stack unwind. */
+#define DEAD_BEEF                                        0xDEADBEEF              /**< Value used as error code on stack dump, can be used to identify stack location on stack unwind. */
 
-#define UART_TX_BUF_SIZE                256                                         /**< UART TX buffer size. */
-#define UART_RX_BUF_SIZE                256                                         /**< UART RX buffer size. */
+#define UART_TX_BUF_SIZE                                 256                     /**< UART TX buffer size. */
+#define UART_RX_BUF_SIZE                                 256                     /**< UART RX buffer size. */
 
-static ble_nus_t                        m_nus;                                      /**< Structure to identify the Nordic UART Service. */
-static uint16_t                         m_conn_handle = BLE_CONN_HANDLE_INVALID;    /**< Handle of the current connection. */
+static ble_nus_t                                         m_nus;                  /**< Structure to identify the Nordic UART Service. */
+static uint16_t m_conn_handle                            = BLE_CONN_HANDLE_INVALID;    /**< Handle of the current connection. */
 
-static ble_uuid_t                       m_adv_uuids[] = {{BLE_UUID_NUS_SERVICE, NUS_SERVICE_UUID_TYPE}};  /**< Universally unique service identifier. */
-#endif
+static ble_uuid_t m_adv_uuids[]                          = {{BLE_UUID_NUS_SERVICE, NUS_SERVICE_UUID_TYPE}};    /**< Universally unique service identifier. */
+// -----------------------------------------------------------------------------
 
+
+/******************************************************************
+ *
+ * Function Name : add_timer
+ *
+ *
+ ******************************************************************/
+static int add_timer(TIMER_FN fn, uint32_t ms_elapse, int count, void* pdata)
+{
+   int i;
+   if (fn == NULL || ms_elapse == 0)
+   { 
+      return -1;
+   }
+   for (i = 0; i < MAX_TIMER_COUNT; i++)
+   {
+      if (gProject->timer[i].fn_timer == NULL)
+      {
+         gProject->timer[i].tick_count                   = 0;
+         gProject->timer[i].ms_elapse                    = ms_elapse;
+         gProject->timer[i].call_count                   = count;
+         gProject->timer[i].fn_timer                     = fn;
+         gProject->timer[i].pData                        = pdata;
+      }
+   }
+   return -1;
+}
+
+/******************************************************************
+ *
+ * Function Name : delete_timer
+ *
+ *
+ ******************************************************************/
+static int delete_timer(TIMER_FN fn)
+{
+   int i;
+   if (fn == NULL)
+   { 
+      return -1;
+   }
+   for (i = 0; i < MAX_TIMER_COUNT; i++)
+   {
+      if (gProject->timer[i].fn_timer == fn)
+      {
+         gProject->timer[i].tick_count                   = 0;
+         gProject->timer[i].ms_elapse                    = 0;
+         gProject->timer[i].call_count                   = 0;
+         gProject->timer[i].call_fn_count                = 0;
+         gProject->timer[i].fn_timer                     = 0;
+         gProject->timer[i].pData                        = NULL;
+      }
+   }
+   return -1;
+}
+
+
+/******************************************************************
+ *
+ * Function Name : serial_receiver_timer_handler()
+ *
+ *
+ ******************************************************************/
+static void serial_receiver_timer_handler(void * p_context)
+{
+   uint32_t tick_count                                   = 0;
+   uint32_t diff_tick_count                              = 0;
+   int i;
+
+   if (app_timer_cnt_get(&tick_count) != NRF_SUCCESS)
+   {
+      printf("Can't get tick count \r\n");
+      gProject->mode                                     = PROJECT_FAILED;
+   }
+
+   for (i = 0; i < MAX_TIMER_COUNT; i++)
+   {
+      if (gProject->timer[i].tick_count == 0)
+      {
+         gProject->timer[i].tick_count                   = tick_count;
+      }
+      else
+      {
+         diff_tick_count                                 = 0;
+         app_timer_cnt_diff_compute(tick_count, gProject->timer[i].tick_count, &diff_tick_count);
+
+         if (diff_tick_count > MILLI_SECOND_TO_TICK_COUNT(gProject->timer[i].ms_elapse))
+         {
+            gProject->timer[i].tick_count                = tick_count;
+            if (gProject->timer[i].call_count < 0)
+            {
+               (*gProject->timer[i].fn_timer)(gProject->timer[i].pData);
+            }
+            else if (gProject->timer[i].call_fn_count < gProject->timer[i].call_count)
+            {
+               (*gProject->timer[i].fn_timer)(gProject->timer[i].pData);
+            }
+         }
+      }
+   }
+}
+
+
+// -----------------------------------------------------------------------------
+// for protocol of transmitter
 #if defined(SERIAL_RECEIVER)
 
-// receiver type
+// -----------------------------------------------------------------------------
+// protocol type
 #define SERIAL_RX_SPEKTRUM_1024
-//#define SERIAL_RX_SPEKTRUM_2048
+// #define SERIAL_RX_SPEKTRUM_2048
 // #define SERIAL_RX_S_BUS
 // #define SERIAL_RX_SUMD
 // #define SERIAL_RX_SUMH
@@ -98,14 +410,21 @@ static ble_uuid_t                       m_adv_uuids[] = {{BLE_UUID_NUS_SERVICE, 
 // #define SERIAL_RX_IBUS
 // #define SERIAL_RX_MSP
 
-#define RX_CHANNEL_ROLL                                  0
-#define RX_CHANNEL_PITCH                                 1
-#define RX_CHANNEL_YAW                                   2
-#define RX_CHANNEL_THROTTLE                              3
-#define RX_CHANNEL_ARMING                                4
 
+// -----------------------------------------------------------------------------
 #if defined(SERIAL_RX_SPEKTRUM_1024)
 
+// -----------------------------------------------------------------------------
+// for timer function
+// specktrum 1024 : 22 ms
+#define SERIAL_RX_SEND_TO_FC_TIMER                       22
+// 60 ms
+#define SERIAL_RX_COMMAND_PARSING_TIMER                  30
+// 60 ms
+#define SERIAL_RX_COMMAND_RESPONSE_TIMER                 30
+// 500 ms
+#define SERIAL_RX_COMMAND_FAILSAFE_TIMER                 100
+
 // UART
 // BAUDRATE : 125000 bps, or 1152000 bps
 // DATA     : 8 bits
@@ -113,27 +432,20 @@ static ble_uuid_t                       m_adv_uuids[] = {{BLE_UUID_NUS_SERVICE, 
 // stop bit : 1 stop
 
 #define SERIAL_RX_BAUDRATE                               (UART_BAUDRATE_BAUDRATE_Baud115200)
-#define DEVICE_NAME                                      "RX-SPEKTRUM-1024"         /**< Name of device. Will be included in the advertising data. */
-// 22 ms : (32768 * 22) / 1000
-#define SERIAL_RX_UPDATE_TICK_COUNT                      720
+#define DEVICE_NAME                                      "DRONE-BT-CONTROLLER"                     /**< Name of device. Will be included in the advertising data. */
 
-#define SERIAL_RX_ROLL_MIN                               0
-#define SERIAL_RX_ROLL_MAX                               1023
-#define SERIAL_RX_ROLL_DEFAULT                           512
-
-#define SERIAL_RX_PITCH_MIN                              0
-#define SERIAL_RX_PITCH_MAX                              1023
-#define SERIAL_RX_PITCH_DEFAULT                          512
-
-#define SERIAL_RX_YAW_MIN                                0
-#define SERIAL_RX_YAW_MAX                                1023
-#define SERIAL_RX_YAW_DEFAULT                            512
-
-#define SERIAL_RX_THROTTLE_MIN                           0
-#define SERIAL_RX_THROTTLE_MAX                           1023
-#define SERIAL_RX_THROTTLE_DEFAULT                       100
-
+// -----------------------------------------------------------------------------
 #elif defined(SERIAL_RX_SPEKTRUM_2048)
+// -----------------------------------------------------------------------------
+// for timer function
+// specktrum 1024 : 22 ms
+#define SERIAL_RX_SPEKTRUM_1024_TIMER                    22
+// 60 ms
+#define SERIAL_RX_COMMAND_PARSING_TIMER                  60
+// 60 ms
+#define SERIAL_RX_COMMAND_RESPONSE_TIMER                 60
+// 500 ms
+#define SERIAL_RX_COMMAND_FAILSAFE_TIMER                 100
 
 // UART
 // BAUDRATE : 125000 bps, or 1152000 bps
@@ -142,119 +454,114 @@ static ble_uuid_t                       m_adv_uuids[] = {{BLE_UUID_NUS_SERVICE, 
 // stop bit : 1 stop
 
 #define SERIAL_RX_BAUDRATE                               (UART_BAUDRATE_BAUDRATE_Baud115200)
-#define DEVICE_NAME                                      "RX-SPEKTRUM-2048"         /**< Name of device. Will be included in the advertising data. */
-// 11 ms : (32768 * 11) / 1000
-#define SERIAL_RX_UPDATE_TICK_COUNT                      360
+#define DEVICE_NAME                                      "DRONE-BT-CONTROLLER"                     /**< Name of device. Will be included in the advertising data. */
 
-#define SERIAL_RX_ROLL_MIN                               0
-#define SERIAL_RX_ROLL_MAX                               2047
-#define SERIAL_RX_ROLL_DEFAULT                           1024
-
-#define SERIAL_RX_PITCH_MIN                              0
-#define SERIAL_RX_PITCH_MAX                              2047
-#define SERIAL_RX_PITCH_DEFAULT                          1024
-
-#define SERIAL_RX_YAW_MIN                                0
-#define SERIAL_RX_YAW_MAX                                2047
-#define SERIAL_RX_YAW_DEFAULT                            1024
-
-#define SERIAL_RX_THROTTLE_MIN                           0
-#define SERIAL_RX_THROTTLE_MAX                           2047
-#define SERIAL_RX_THROTTLE_DEFAULT                       200
-
+// -----------------------------------------------------------------------------
 #elif defined(SERIAL_RX_S_BUS)
-#define DEVICE_NAME                                      "RX-S-BUS"                 /**< Name of device. Will be included in the advertising data. */
+
+// -----------------------------------------------------------------------------
 #elif defined(SERIAL_RX_SUMD)
-#define DEVICE_NAME                                      "RX-SUMD"                  /**< Name of device. Will be included in the advertising data. */
+
+// -----------------------------------------------------------------------------
 #elif defined(SERIAL_RX_SUMH)
-#define DEVICE_NAME                                      "RX-SUMH"                  /**< Name of device. Will be included in the advertising data. */
+
+// -----------------------------------------------------------------------------
 #elif defined(SERIAL_RX_MODE_B)
-#define DEVICE_NAME                                      "RX-MODE-B"                /**< Name of device. Will be included in the advertising data. */
+
+// -----------------------------------------------------------------------------
 #elif defined(SERIAL_RX_MODE_B_BJ01)
-#define DEVICE_NAME                                      "RX-MODE-B-BJ01"           /**< Name of device. Will be included in the advertising data. */
+
+// -----------------------------------------------------------------------------
 #elif defined(SERIAL_RX_IBUS)
-#define DEVICE_NAME                                      "RX-MODE-IBUS"             /**< Name of device. Will be included in the advertising data. */
+
+// -----------------------------------------------------------------------------
 #elif defined(SERIAL_RX_MSP)
-#define DEVICE_NAME                                      "RX-MODE-MSP"              /**< Name of device. Will be included in the advertising data. */
+
+// -----------------------------------------------------------------------------
 #else
-#define DEVICE_NAME                                      "Nordic_UART"              /**< Name of device. Will be included in the advertising data. */
+#error "Not supported"
 #endif
 
-
-// -----------------------------------------------------------------------------
-// protocol for phone and bt's receiver
-#define SERIAL_BT_COMMAND_MAX_SIZE                       32
-static uint8_t g_bt_rx_command[SERIAL_BT_COMMAND_MAX_SIZE];
-
-typedef struct _BT_PROTOCOL_DATA
+/******************************************************************
+ *
+ * Function Name : timer_send_msg_to_fc_controller()
+ *
+ *
+ ******************************************************************/
+static void timer_send_msg_to_fc_controller(void* pdata)
 {
-   uint8_t version_high;
-   uint8_t version_low;
-   uint8_t command;
-   uint8_t size;
-   uint16_t channel_1;                                   // ROLL
-   uint16_t channel_2;                                   // PITCH
-   uint16_t channel_3;                                   // YAW
-   uint16_t channel_4;                                   // THROTTLE
-   uint16_t channel_5;                                   // GEAR
-   uint16_t channel_6;                                   // AUX_1
-   uint16_t channel_7;                                   // AUX_2
-   uint16_t channel_8;                                   // AUX_3
-   uint16_t channel_9;                                   // AUX_4
-   uint16_t channel_10;                                  // AUX_5
-   uint16_t channel_11;                                  // AUX_6
-   uint16_t channel_12;                                  // AUX_7
-   uint16_t crc;                                         // CRC
-} __attribute__ ((__packed__)) BT_PROTOCOL_DATA;
 
-typedef struct _BT_PROTOCOL_RESPONSE
+}
+
+/******************************************************************
+ *
+ * Function Name : timer_bt_command_parser()
+ *
+ *
+ ******************************************************************/
+static void timer_bt_command_parser(void* pdata)
 {
-   uint8_t version_high;
-   uint8_t version_low;
-   uint8_t command;
-   uint8_t size;
-   uint16_t status;
-   uint16_t crc;                                         // CRC
-} __attribute__ ((__packed__)) BT_PROTOCOL_RESPONSE;
+   BT_PROTOCOL_COMMAND* pbtProtocolCommand               = NULL;
 
-#define  PROTOCOL_SEND_TO_TRANSMITTER                    0x01
-#define  PROTOCOL_RESPONSE_FROM_TRANSMITTER              0x02
-#define  PROTOCOL_ALIVE_FROM_TRANSMITTER                 0x03
+   if (gProject->parsing_status != 0)
+   {
+      return;
+   }
 
-static uint8_t g_bt_rx_command_complete                  = 0;
+   if (gProject->received_rx_length > 0)
+   {
+      pbtProtocolCommand                                 = (BT_PROTOCOL_COMMAND*) gProject->bt_rx_buffer;
+      if (pbtProtocolCommand->version_high != PROTOCOL_HEADER_HIGH_VERSION)
+      {
+         gProject->parsing_result_code                   = ERROR_RESPONSE_VERSION;
+         gProject->parsing_status                        = 1;
+         // make txbuffer
+         gProject->received_rx_length                    = 0;
+         return;
+      }
 
-static uint32_t g_prev_tick_count                        = 0;
-static uint32_t g_update_tick_count                      = 0;
+      if (pbtProtocolCommand->version_low != PROTOCOL_HEADER_LOW_VERSION)
+      {
+         gProject->parsing_result_code                   = ERROR_RESPONSE_VERSION;
+         gProject->parsing_status                        = 1;
+         // make txbuffer
+         gProject->received_rx_length                    = 0;
+         return;
+      }
+   }
+   return;
+}
 
-static uint8_t g_update_packet_complete                  = 0;
-// -----------------------------------------------------------------------------
-
-typedef struct
+/******************************************************************
+ *
+ * Function Name : timer_bt_response()
+ *
+ *
+ ******************************************************************/
+static void timer_bt_response(void* pdata)
 {
-   uint8_t channel_id;
-   uint16_t min;
-   uint16_t max;
-   uint16_t failsafe_value;
-   uint16_t value;
-} RX_CHANNEL;
 
-static RX_CHANNEL g_rx_channel[]                         =
+}
+
+/******************************************************************
+ *
+ * Function Name : timer_failsafe_mode()
+ *
+ *
+ ******************************************************************/
+static void timer_failsafe_mode(void* pdata)
 {
-   { RX_CHANNEL_ROLL,         SERIAL_RX_ROLL_MIN,     SERIAL_RX_ROLL_MAX,     SERIAL_RX_ROLL_DEFAULT,       SERIAL_RX_ROLL_DEFAULT},
-   { RX_CHANNEL_PITCH,        SERIAL_RX_PITCH_MIN,    SERIAL_RX_PITCH_MAX,    SERIAL_RX_PITCH_DEFAULT,      SERIAL_RX_PITCH_DEFAULT},
-   { RX_CHANNEL_YAW,          SERIAL_RX_YAW_MIN,      SERIAL_RX_YAW_MAX,      SERIAL_RX_YAW_DEFAULT,        SERIAL_RX_YAW_DEFAULT},
-   { RX_CHANNEL_THROTTLE,     SERIAL_RX_THROTTLE_MIN, SERIAL_RX_THROTTLE_MAX, SERIAL_RX_THROTTLE_DEFAULT,   SERIAL_RX_THROTTLE_DEFAULT},
-   { RX_CHANNEL_ARMING,       0,                      1023,                   0,                            0},
-};
+
+}
+
+
+
 
 #if 1
 
-// #define  PROTOCOL_SEND_TO_TRANSMITTER                    0x01
-// #define  PROTOCOL_RESPONSE_FROM_TRANSMITTER              0x02
-// #define  PROTOCOL_ALIVE_FROM_TRANSMITTER                 0x03
-
 uint8_t update_receiver_command()
 {
+#if 0
    uint32_t err_code;
    BT_PROTOCOL_DATA* pProtocolData                          = (BT_PROTOCOL_DATA*) g_bt_rx_command;
    BT_PROTOCOL_RESPONSE reponse;
@@ -272,7 +579,7 @@ uint8_t update_receiver_command()
    {
       APP_ERROR_CHECK(err_code);
    }
-
+#endif
    return 0;
 }
 #else
@@ -310,6 +617,9 @@ static uint8_t debug_led                                 = 0;
    return 0;
 }
 #endif
+
+
+
 #if defined(SERIAL_RX_SPEKTRUM_1024)
 
 #define MASK_1024_CHANID                                 0xFC00
@@ -344,6 +654,7 @@ static uint8_t debug_led                                 = 0;
 #define SPEKTRUM_CHANNEL_AUX_6                           10
 #define SPEKTRUM_CHANNEL_AUX_7                           11
 
+#if 0
 typedef struct
 {
    uint8_t fades;
@@ -351,18 +662,13 @@ typedef struct
    uint16_t channel[MAX_CHANNEL_COUNT];
 } RX_PACKET_SPEKTRUM_1024;
 
-#define RX_PACKET_SPEKTRUM_CHANNEL_ID_0                  0
-#define RX_PACKET_SPEKTRUM_CHANNEL_ID_1                  1
-#define RX_PACKET_SPEKTRUM_CHANNEL_ID_2                  2
-#define RX_PACKET_SPEKTRUM_CHANNEL_ID_3                  3
-#define RX_PACKET_SPEKTRUM_CHANNEL_ID_4                  4
-#define RX_PACKET_SPEKTRUM_CHANNEL_ID_5                  5
-#define RX_PACKET_SPEKTRUM_CHANNEL_ID_6                  6
-
+#endif
 
 #define UART_RETRY_SEND_COUNT                            5
 uint8_t send_receiver_command()
 {
+
+#if 0
    RX_PACKET_SPEKTRUM_1024 packet;
    uint8_t retry_count;
    uint8_t* stream_packet                                = (uint8_t*) &packet;
@@ -603,283 +909,48 @@ uint8_t send_receiver_command()
                                  (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6]     ) & 0xFF));
    }
 #endif
+#endif
+
    return 0;
 }
 
 #elif defined(SERIAL_RX_SPEKTRUM_2048)
 
-#define MASK_2048_PHASE                                  0x8000
-#define MASK_2048_CHANID                                 0x7800
-#define MASK_2048_SXPOS                                  0x07FF
-
-#define SPEKTRUM_2048_CHANNEL_SHIFT_BITS                 11
-
-#define MAX_CHANNEL_COUNT                                7
-
-#define DSM2_22MS                                        0x01                    // 1024
-#define DSM2_11MS                                        0x12                    // 2048
-#define DSMS_22MS                                        0xA2                    // 2048
-#define DSMX_11MS                                        0xB2                    // 2048
-
-#define SPEKTRUM_CHANNEL_THROTTLE                        0
-#define SPEKTRUM_CHANNEL_AILERON                         1
-#define SPEKTRUM_CHANNEL_ELEVATOR                        2
-#define SPEKTRUM_CHANNEL_RUDDER                          3
-#define SPEKTRUM_CHANNEL_GEAR                            4
-#define SPEKTRUM_CHANNEL_AUX_1                           5
-#define SPEKTRUM_CHANNEL_AUX_2                           6
-#define SPEKTRUM_CHANNEL_AUX_3                           7
-#define SPEKTRUM_CHANNEL_AUX_4                           8
-#define SPEKTRUM_CHANNEL_AUX_5                           9
-#define SPEKTRUM_CHANNEL_AUX_6                           10
-#define SPEKTRUM_CHANNEL_AUX_7                           11
-
-typedef struct
-{
-   uint8_t fades;
-   uint8_t system;
-   uint16_t channel[MAX_CHANNEL_COUNT];
-} RX_PACKET_SPEKTRUM_1024;
-
-#define RX_PACKET_SPEKTRUM_CHANNEL_ID_0                  0
-#define RX_PACKET_SPEKTRUM_CHANNEL_ID_1                  1
-#define RX_PACKET_SPEKTRUM_CHANNEL_ID_2                  2
-#define RX_PACKET_SPEKTRUM_CHANNEL_ID_3                  3
-#define RX_PACKET_SPEKTRUM_CHANNEL_ID_4                  4
-#define RX_PACKET_SPEKTRUM_CHANNEL_ID_5                  5
-#define RX_PACKET_SPEKTRUM_CHANNEL_ID_6                  6
-
-uint8_t send_receiver_command()
-{
-   RX_PACKET_SPEKTRUM_1024 packet;
-   memset(&packet, 0, sizeof(RX_PACKET_SPEKTRUM_1024));
-
-   // missed frames for remote
-   // always is null
-   packet.fades                                          = 0;
-   // type of receiver
-   packet.system                                         = DSMX_11MS;
-
-   // throttle (드론 상승, 하강)
-   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_0]       = (MASK_2048_CHANID & (SPEKTRUM_CHANNEL_THROTTLE << SPEKTRUM_2048_CHANNEL_SHIFT_BITS))       |
-                                                           (g_rx_channel[RX_CHANNEL_THROTTLE].value & MASK_2048_SXPOS);
-
-   // Aileron (좌측 이동, 우측 이동)
-   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_1]       = (MASK_2048_CHANID & (SPEKTRUM_CHANNEL_AILERON << SPEKTRUM_2048_CHANNEL_SHIFT_BITS))        |
-                                                           (g_rx_channel[RX_CHANNEL_ROLL].value & MASK_2048_SXPOS);
-
-   // Elevator (전진, 후진)
-   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_2]       = (MASK_2048_CHANID & (SPEKTRUM_CHANNEL_ELEVATOR << SPEKTRUM_2048_CHANNEL_SHIFT_BITS))       |
-                                                           (g_rx_channel[RX_CHANNEL_PITCH].value & MASK_2048_SXPOS);
-
-   // Rudder (시계방향 회전, 반 시계방향 회전)
-   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_3]       = (MASK_2048_CHANID & (SPEKTRUM_CHANNEL_RUDDER << SPEKTRUM_2048_CHANNEL_SHIFT_BITS))         |
-                                                           (g_rx_channel[RX_CHANNEL_YAW].value & MASK_2048_SXPOS);
-
-   // GEAR
-   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_4]       = (MASK_2048_CHANID & (SPEKTRUM_CHANNEL_GEAR << SPEKTRUM_2048_CHANNEL_SHIFT_BITS))           |
-                                                           (0x400 & MASK_2048_SXPOS);
-   // ADC 1
-   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_5]       = (MASK_2048_CHANID & (SPEKTRUM_CHANNEL_AUX_2 << SPEKTRUM_2048_CHANNEL_SHIFT_BITS))          |
-                                                           (0x400 & MASK_2048_SXPOS);
-
-   // ADC 2
-   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6]       = (MASK_2048_CHANID & (SPEKTRUM_CHANNEL_AUX_3 << SPEKTRUM_2048_CHANNEL_SHIFT_BITS))          |
-                                                           (0x400 & MASK_2048_SXPOS);
-
-#if 0
-   {
-      printf("\r\n");
-      printf("[%04x] ", packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_0]);
-      printf("[%04x] ", packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_1]);
-      printf("[%04x] ", packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_2]);
-      printf("[%04x] ", packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_3]);
-      printf("[%04x] ", packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_4]);
-      printf("[%04x] ", packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_5]);
-      printf("[%04x] ", packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6]);
-   }
-#endif
-
-#if 1
-   // fades
-   while(app_uart_put(packet.fades) != NRF_SUCCESS)
-   {
-   }
-   // system
-   while(app_uart_put(packet.system) != NRF_SUCCESS)
-   {
-   }
-   
-   // throttle
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_0] >> 8) & 0xFF)) != NRF_SUCCESS)
-   {
-   }
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_0]     ) & 0xFF)) != NRF_SUCCESS)
-   {
-   }
-
-   // aileron
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_1] >> 8) & 0xFF)) != NRF_SUCCESS)
-   {
-   }
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_1]     ) & 0xFF)) != NRF_SUCCESS)
-   {
-   }
-
-   // aileron
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_2] >> 8) & 0xFF)) != NRF_SUCCESS)
-   {
-   }
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_2]     ) & 0xFF)) != NRF_SUCCESS)
-   {
-   }
-
-   // rudder
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_3] >> 8) & 0xFF)) != NRF_SUCCESS)
-   {
-   }
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_3]     ) & 0xFF)) != NRF_SUCCESS)
-   {
-   }
-
-   // adc 1
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_4] >> 8) & 0xFF)) != NRF_SUCCESS)
-   {
-   }
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_4]     ) & 0xFF)) != NRF_SUCCESS)
-   {
-   }
-
-   // adc 2
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_5] >> 8) & 0xFF)) != NRF_SUCCESS)
-   {
-   }
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_5]     ) & 0xFF)) != NRF_SUCCESS)
-   {
-   }
-
-   // adc 3
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6] >> 8) & 0xFF)) != NRF_SUCCESS)
-   {
-   }
-   while(app_uart_put((uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6]     ) & 0xFF)) != NRF_SUCCESS)
-   {
-   }
-#endif
-
-#if 0
-   {
-      printf("\r\n");
-      printf("[%02x] [%02x] ",   packet.fades, packet.system);
-      printf("[%02x] [%02x] : ", (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_0] >> 8) & 0xFF),
-                                 (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_0]     ) & 0xFF));
-      printf("[%02x] [%02x] : ", (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_1] >> 8) & 0xFF),
-                                 (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_1]     ) & 0xFF));
-      printf("[%02x] [%02x] : ", (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_2] >> 8) & 0xFF),
-                                 (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_2]     ) & 0xFF));
-      printf("[%02x] [%02x] : ", (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_3] >> 8) & 0xFF),
-                                 (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_3]     ) & 0xFF));
-      printf("[%02x] [%02x] : ", (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_4] >> 8) & 0xFF),
-                                 (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_4]     ) & 0xFF));
-      printf("[%02x] [%02x] : ", (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_5] >> 8) & 0xFF),
-                                 (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_5]     ) & 0xFF));
-      printf("[%02x] [%02x] ",   (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6] >> 8) & 0xFF),
-                                 (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6]     ) & 0xFF));
-   }
-#endif
-   return 0;
-}
+// Does not porting...
 
 #elif defined(SERIAL_RX_S_BUS)
 
-uint8_t send_receiver_command()
-{
-   return 0;
-}
+// Does not porting...
 
 #elif defined(SERIAL_RX_SUMD)
 
-uint8_t send_receiver_command()
-{
-   return 0;
-}
+// Does not porting...
 
 #elif defined(SERIAL_RX_SUMH)
 
-uint8_t send_receiver_command()
-{
-   return 0;
-}
+// Does not porting...
 
 #elif defined(SERIAL_RX_MODE_B)
 
-uint8_t send_receiver_command()
-{
-   return 0;
-}
+// Does not porting...
 
 #elif defined(SERIAL_RX_MODE_B_BJ01)
 
-uint8_t send_receiver_command()
-{
-   return 0;
-}
+// Does not porting...
 
 #elif defined(SERIAL_RX_IBUS)
 
-uint8_t send_receiver_command()
-{
-   return 0;
-}
+// Does not porting...
 
 #elif defined(SERIAL_RX_MSP)
 
-uint8_t send_receiver_command()
-{
-   return 0;
-}
+// Does not porting...
 
 #else
 
-uint8_t send_receiver_command()
-{
-   return 0;
-}
+// Does not supported ...
 
 #endif
-
-void serial_receiver_timer_handler(void * p_context)
-{
-   uint32_t cur_tick_count                               = 0;
-   uint32_t diff_tick_count                              = 0;
-   if (g_prev_tick_count == 0)
-   {
-      if (app_timer_cnt_get(&g_prev_tick_count) != NRF_SUCCESS)
-      {
-         printf("Can't get tick count \r\n");
-      }
-      return;
-   }
-   if (app_timer_cnt_get(&cur_tick_count) != NRF_SUCCESS)
-   {
-      printf("Can't get tick count \r\n");
-      return;
-   }
-
-   if (app_timer_cnt_diff_compute(cur_tick_count, g_prev_tick_count, &diff_tick_count) != NRF_SUCCESS)
-   {
-      printf("Can't diff tick count \r\n");
-      return;
-   }
-   g_prev_tick_count                                     = cur_tick_count;
-
-   g_update_tick_count                                   += diff_tick_count;
-   if (g_update_tick_count > SERIAL_RX_UPDATE_TICK_COUNT)
-   {
-      g_update_tick_count                                = 0;
-      g_update_packet_complete                           = 1;
-   }
-}
 
 #endif   // SERIAL_RECEIVER
 
@@ -917,6 +988,9 @@ static uint16_t                         m_conn_handle = BLE_CONN_HANDLE_INVALID;
 
 static ble_uuid_t                       m_adv_uuids[] = {{BLE_UUID_NUS_SERVICE, NUS_SERVICE_UUID_TYPE}};  /**< Universally unique service identifier. */
 #endif
+
+
+
 
 /**@brief Function for assert macro callback.
  *
@@ -980,41 +1054,18 @@ static void nus_data_handler(ble_nus_t * p_nus, uint8_t * p_data, uint16_t lengt
 {
    int i;
 
-#if defined(SERIAL_RECEIVER)
-   if (g_bt_rx_command_complete == 0)
+   if (gProject->received_rx_length > 0)
    {
-      for (i = 0; i < SERIAL_BT_COMMAND_MAX_SIZE; i++)
-      {
-         g_bt_rx_command[i]                              = 0;
-      }
-
-      copy_byte                                          = SERIAL_BT_COMMAND_MAX_SIZE > length ? length : SERIAL_BT_COMMAND_MAX_SIZE;
-      for (i = 0; i < copy_byte; i++)
-      {
-         g_bt_rx_command[i]                              = *(p_data + i);
-      }
-
-      g_bt_rx_command_complete                           = 1;
+      gProject->received_drop_frame_cout++;
+      return;
    }
-#if 0
-   char bt_rx_command[SERIAL_BT_COMMAND_MAX_SIZE + 1];
-   if (length < SERIAL_BT_COMMAND_MAX_SIZE)
+
+   gProject->received_rx_length                       = (length > PROTOCOL_CHANNEL_MAX_SIZE) ? (PROTOCOL_CHANNEL_MAX_SIZE) : (length);
+
+   for (i = 0; i < gProject->received_rx_length; i++)
    {
-      memset(bt_rx_command, 0, sizeof(bt_rx_command) + 1);
-      memcpy(bt_rx_command, p_data, length);
-      update_receiver_command(bt_rx_command);
+      gProject->bt_rx_buffer[i]                       = *(p_data + i);
    }
-#endif
-
-#else
-    for (uint32_t i = 0; i < length; i++)
-    {
-        while(app_uart_put(p_data[i]) != NRF_SUCCESS);
-    }
-  #if 0
-    while(app_uart_put('\n') != NRF_SUCCESS);
-  #endif
-#endif
 }
 /**@snippet [Handling the data received over BLE] */
 
@@ -1427,43 +1478,35 @@ static void power_manage(void)
  */
 int main(void)
 {
-    uint32_t err_code;
-    bool erase_bonds;
+   uint32_t err_code;
+   bool erase_bonds;
 #if !defined(SERIAL_RECEIVER)
-    uint8_t start_string[] = START_STRING;
+   uint8_t start_string[] = START_STRING;
 #endif
-    // Initialize.
-    APP_TIMER_INIT(APP_TIMER_PRESCALER, APP_TIMER_OP_QUEUE_SIZE, false);
+
+   UNUSED_VARIABLE(gProject);
+   UNUSED_VARIABLE(g_failsafe_value);
+   UNUSED_VARIABLE(add_timer);
+   UNUSED_VARIABLE(delete_timer);
+
+   // clear variable ...
+   memset(gProject, 0, sizeof(gProject));
+
+   gProject->mode                                        = PROJECT_INIT_STATUS;
+
+   // Initialize.
+   APP_TIMER_INIT(APP_TIMER_PRESCALER, APP_TIMER_OP_QUEUE_SIZE, false);
 #if defined(SERIAL_RECEIVER)
-    APP_TIMER_DEF(serial_rx_timer);
+   APP_TIMER_DEF(serial_rx_timer);
 #endif
-    uart_init();
+   uart_init();
 
-    buttons_leds_init(&erase_bonds);
-    ble_stack_init();
-    gap_params_init();
-    services_init();
-    advertising_init();
-    conn_params_init();
-
-#if !defined(SERIAL_RECEIVER)
-    printf("%s", start_string);
-#else
-    printf("program start \r\n ");
-#endif
-    err_code = ble_advertising_start(BLE_ADV_MODE_FAST);
-    APP_ERROR_CHECK(err_code);
-
-#if defined(SERIAL_RECEIVER)
-   if (app_timer_create(&serial_rx_timer, APP_TIMER_MODE_REPEATED, serial_receiver_timer_handler) != NRF_SUCCESS)
-   {
-      printf("Can't create app timer \r\n");
-   }
-   if (app_timer_start(serial_rx_timer, APP_TIMER_TICKS(1, APP_TIMER_PRESCALER), NULL) != NRF_SUCCESS)
-   {
-      printf("Can't start app timer \r\n");
-   }
-#endif
+   buttons_leds_init(&erase_bonds);
+   ble_stack_init();
+   gap_params_init();
+   services_init();
+   advertising_init();
+   conn_params_init();
 
 #if defined(WAVESHARE_BOARD)
    nrf_gpio_cfg_output(WAVESHARE_LED_1);
@@ -1477,28 +1520,42 @@ int main(void)
    nrf_gpio_pin_write(WAVESHARE_LED_3, 0);
    nrf_gpio_pin_write(WAVESHARE_LED_4, 0);
    nrf_gpio_pin_write(WAVESHARE_LED_5, 0);
-
 #endif
 
-    // Enter main loop.
-    for (;;)
-    {
+#if !defined(SERIAL_RECEIVER)
+   printf("%s", start_string);
+#else
+   printf("program start \r\n ");
+#endif
+   err_code                                              = ble_advertising_start(BLE_ADV_MODE_FAST);
+   if (err_code != NRF_SUCCESS)
+   {
+      printf("ble_advertising_start() failed : %d \r\n", (int) err_code);
+      gProject->mode                                     = PROJECT_FAILED;
+   }
+   APP_ERROR_CHECK(err_code);
+
 #if defined(SERIAL_RECEIVER)
-      if (g_bt_rx_command_complete != 0)
-      {
-         update_receiver_command();
+   if (app_timer_create(&serial_rx_timer, APP_TIMER_MODE_REPEATED, serial_receiver_timer_handler) != NRF_SUCCESS)
+   {
+      printf("Can't create app timer \r\n");
+   }
+   if (app_timer_start(serial_rx_timer, APP_TIMER_TICKS(1, APP_TIMER_PRESCALER), NULL) != NRF_SUCCESS)
+   {
+      printf("Can't start app timer \r\n");
+   }
 
-         g_bt_rx_command_complete                        = 0;
-      }
-      if (g_update_packet_complete != 0)
-      {
-         send_receiver_command();
-
-         g_update_packet_complete                        = 0;
-      }
+   add_timer(timer_send_msg_to_fc_controller, SERIAL_RX_SEND_TO_FC_TIMER, -1, NULL);
+   add_timer(timer_bt_command_parser, SERIAL_RX_COMMAND_PARSING_TIMER, -1, NULL);
+   add_timer(timer_bt_response, SERIAL_RX_COMMAND_RESPONSE_TIMER, -1, NULL);
+   add_timer(timer_failsafe_mode, SERIAL_RX_COMMAND_FAILSAFE_TIMER, -1, NULL);
 #endif
-        power_manage();
-    }
+
+   // Enter main loop.
+   for (;;)
+   {
+      power_manage();
+   }
 }
 
 
