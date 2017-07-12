@@ -72,6 +72,7 @@
 #define PROTOCOL_ALIVE_RESPONSE                          0xF2
 #define PROTOCOL_CHANNEL_MESSAGE                         0x03
 #define PROTOCOL_CHANNEL_RESPONSE                        0xF3
+#define PROTOCOL_UNKNOWN_RESPONSE                        0xFF
 
 // channel id
 // if it need modified id of channel, must be changed in the android.
@@ -163,6 +164,8 @@ enum RESPONSE_ERROR_CODE
    ERROR_RESPONSE_VERSION                                = 1,
    ERROR_RESPONSE_CRC_ERROR                              = 2,
    ERROR_RESPONSE_CHANNEL_FAILED                         = 3,
+   ERROR_ALREADY_REGISTERED                              = 4,
+   ERROR_UNKNOWN_COMMAND                                 = 5,
 };
 
 // -----------------------------------------------------------------------------
@@ -194,6 +197,8 @@ typedef struct _PROJECT
 
    // check alive
    uint32_t last_alive_tick_count;
+
+   uint8_t register_client;
 
    // for remote controller
    uint8_t serial_tx_buffer[SERIAL_RX_TRANSMITTER_MAX_SIZE];
@@ -502,6 +507,7 @@ static void timer_send_msg_to_fc_controller(void* pdata)
 static void timer_bt_command_parser(void* pdata)
 {
    BT_PROTOCOL_COMMAND* pbtProtocolCommand               = NULL;
+   BT_PROTOCOL_COMMAND* pbtProtocolResponse              = NULL;
 
    if (gProject->parsing_status != 0)
    {
@@ -511,22 +517,106 @@ static void timer_bt_command_parser(void* pdata)
    if (gProject->received_rx_length > 0)
    {
       pbtProtocolCommand                                 = (BT_PROTOCOL_COMMAND*) gProject->bt_rx_buffer;
+      pbtProtocolResponse                                = (BT_PROTOCOL_COMMAND*) gProject->bt_tx_buffer;
+
+      gProject->parsing_result_code                      = SUCCESS_RESPONSE;
+      gProject->parsing_status                           = 1;
+      gProject->received_rx_length                       = 0;
+
+      pbtProtocolResponse->version_high                  = PROTOCOL_HEADER_HIGH_VERSION;
+      pbtProtocolResponse->version_low                   = PROTOCOL_REGISTER_RESPONSE;
+
+      pbtProtocolResponse->size                          = PROTOCOL_BASIC_MAX_SIZE;
+
+      // error code
+      pbtProtocolResponse->option_1_high                 = 0;
+      pbtProtocolResponse->option_1_low                  = SUCCESS_RESPONSE;
+
+      // reserved
+      pbtProtocolResponse->option_2_high                 = 0;
+      pbtProtocolResponse->option_2_low                  = 0;
+
+
+      switch (pbtProtocolCommand->command)
+      {
+         case PROTOCOL_REGISTER_MESSAGE :
+            pbtProtocolResponse->command                 = PROTOCOL_REGISTER_RESPONSE;
+            break;
+
+         case PROTOCOL_ALIVE_MESSAGE :
+            pbtProtocolResponse->command                 = PROTOCOL_ALIVE_RESPONSE;
+            break;
+
+         case PROTOCOL_CHANNEL_MESSAGE :
+            pbtProtocolResponse->command                 = PROTOCOL_UNKNOWN_RESPONSE;
+            break;
+
+         default :
+            gProject->parsing_result_code                = ERROR_UNKNOWN_COMMAND;
+            pbtProtocolResponse->command                 = PROTOCOL_UNKNOWN_RESPONSE;
+
+            // error code
+            pbtProtocolResponse->option_1_high           = 0;
+            pbtProtocolResponse->option_1_low            = ERROR_UNKNOWN_COMMAND;
+            return;
+      }
+
+
       if (pbtProtocolCommand->version_high != PROTOCOL_HEADER_HIGH_VERSION)
       {
          gProject->parsing_result_code                   = ERROR_RESPONSE_VERSION;
-         gProject->parsing_status                        = 1;
-         // make txbuffer
-         gProject->received_rx_length                    = 0;
+
+         // error code
+         pbtProtocolResponse->option_1_high              = 0;
+         pbtProtocolResponse->option_1_low               = ERROR_RESPONSE_VERSION;
          return;
       }
 
       if (pbtProtocolCommand->version_low != PROTOCOL_HEADER_LOW_VERSION)
       {
          gProject->parsing_result_code                   = ERROR_RESPONSE_VERSION;
-         gProject->parsing_status                        = 1;
-         // make txbuffer
-         gProject->received_rx_length                    = 0;
+
+         // error code
+         pbtProtocolResponse->option_1_high              = 0;
+         pbtProtocolResponse->option_1_low               = ERROR_RESPONSE_VERSION;
          return;
+      }
+
+      switch (pbtProtocolCommand->command)
+      {
+         case PROTOCOL_REGISTER_MESSAGE :
+            if (gProject->register_client != 0)
+            {
+               gProject->parsing_result_code             = ERROR_ALREADY_REGISTERED;
+
+               // error code
+               pbtProtocolResponse->option_1_high        = 0;
+               pbtProtocolResponse->option_1_low         = ERROR_ALREADY_REGISTERED;
+               return;
+            }
+            else
+            {
+               // register client
+               gProject->register_client                 = 1;
+               return;
+            }
+            break;
+
+         case PROTOCOL_ALIVE_MESSAGE :
+            // alive time 관련 처리
+            return;
+
+         case PROTOCOL_CHANNEL_MESSAGE :
+            // channel information parsing
+            return;
+
+         default :
+            gProject->parsing_result_code                = ERROR_UNKNOWN_COMMAND;
+
+            // result code
+            pbtProtocolResponse->option_1_high           = 0;
+            pbtProtocolResponse->option_1_low            = ERROR_UNKNOWN_COMMAND;
+            return;
       }
    }
    return;
@@ -540,7 +630,23 @@ static void timer_bt_command_parser(void* pdata)
  ******************************************************************/
 static void timer_bt_response(void* pdata)
 {
+   uint32_t err_code;
 
+#if 0
+   BT_PROTOCOL_COMMAND* pbtProtocolResponse              = NULL;
+   pbtProtocolResponse                                   = (BT_PROTOCOL_COMMAND*) gProject->bt_tx_buffer;
+#endif
+
+   if (gProject->parsing_status != 0)
+   {
+      return;
+   }
+
+   err_code                                              = ble_nus_string_send(&m_nus, gProject->bt_tx_buffer, PROTOCOL_BASIC_MAX_SIZE);
+   if (err_code != NRF_SUCCESS)
+   {
+   }
+   gProject->parsing_status                              = 0;
 }
 
 /******************************************************************
