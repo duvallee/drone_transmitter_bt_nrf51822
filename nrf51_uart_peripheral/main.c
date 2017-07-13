@@ -149,13 +149,34 @@ enum BT_COMMAND_STATUS
 // -----------------------------------------------------------------------------
 enum PROJECT_MODE
 {
-   PROJECT_INIT_STATUS                                   = 0,
-   PROJECT_READY_STATUS                                  = 1,
-   PROJECT_NORMAL_STATUS                                 = 2,
-   PROJECT_FAILSAFE_STATUS                               = 3,
-   
-   PROJECT_FAILED                                        = -1,
+   PROJECT_INIT_STATUS                                   = 0x00000000,
+   PROJECT_READY_STATUS                                  = 0x00000001,
+   PROJECT_NORMAL_STATUS                                 = 0x00000002,
+   PROJECT_STATUS_MASK                                   = 0x0000FFFF,
+   PROJECT_STATUS_UNMASK                                 = 0xFFFF0000,
+
+   PROJECT_FAILSAFE_MODE                                 = 0x08000000,
+   PROJECT_FAILSAFE_MASK                                 = 0x0F000000,
+   PROJECT_FAILSAFE_UNMASK                               = 0xF0FFFFFF,
+
+   PROJECT_FAIL_STATUS                                   = 0x80000000,
 };
+
+#define SET_PROJECT_INIT_STATUS(x)                       (x = ((x & PROJECT_STATUS_UNMASK) | PROJECT_INIT_STATUS))
+#define IS_PROJECT_INIT_STATUS(x)                        (x & PROJECT_INIT_STATUS)
+
+#define SET_PROJECT_READY_STATUS(x)                      (x = ((x & PROJECT_STATUS_UNMASK) | PROJECT_READY_STATUS))
+#define IS_PROJECT_READY_STATUS(x)                       (x & PROJECT_READY_STATUS)
+
+#define SET_PROJECT_NORMAL_STATUS(x)                     (x = ((x & PROJECT_STATUS_UNMASK) | PROJECT_NORMAL_STATUS))
+#define IS_PROJECT_NORMAL_STATUS(x)                      (x & PROJECT_NORMAL_STATUS)
+
+#define SET_PROJECT_FAILSAFE_MODE(x)                     (x = ((x & PROJECT_FAILSAFE_UNMASK) | PROJECT_FAILSAFE_MODE))
+#define RESET_PROJECT_FAILSAFE_MODE(x)                   (x = (x & PROJECT_FAILSAFE_UNMASK))
+#define IS_PROJECT_FAILSAFE_MODE(x)                      (x & PROJECT_FAILSAFE_MODE)
+
+#define SET_PROJECT_FAIL_STATUS(x)                       (x = (x | PROJECT_FAIL_STATUS))
+#define IS_PROJECT_FAIL_STATUS(x)                        (x & PROJECT_FAIL_STATUS)
 
 // -----------------------------------------------------------------------------
 enum RESPONSE_ERROR_CODE
@@ -166,6 +187,8 @@ enum RESPONSE_ERROR_CODE
    ERROR_RESPONSE_CHANNEL_FAILED                         = 3,
    ERROR_ALREADY_REGISTERED                              = 4,
    ERROR_UNKNOWN_COMMAND                                 = 5,
+   ERROR_INTERNAL_PACKET_SIZE                            = 6,
+   ERROR_PACKET_SIZE                                     = 7,
 };
 
 // -----------------------------------------------------------------------------
@@ -191,24 +214,33 @@ typedef struct _TIMER
 typedef struct _PROJECT
 {
    // remote controller status
-   uint8_t mode;
+   uint32_t mode;
    // timer tick count
    uint32_t tick_count;
 
    // check alive
    uint32_t last_alive_tick_count;
 
+   uint32_t client_alive_count;
    uint8_t register_client;
 
-   // for remote controller
-   uint8_t serial_tx_buffer[SERIAL_RX_TRANSMITTER_MAX_SIZE];
+   // tick counter when enter failsafe mode
+   uint32_t enter_failsafe_mode_tick_count;
+
+   // use internal : packet for fc
+   uint8_t internal_tx_buffer[SERIAL_RX_TRANSMITTER_MAX_SIZE];
+   uint8_t internal_tx_packet_size;
+
+   // send to fc
+   uint8_t fc_tx_buffer[SERIAL_RX_TRANSMITTER_MAX_SIZE];
+   uint8_t fc_tx_packet_size;
 
    // for receive data from bt
    uint8_t bt_rx_buffer[PROTOCOL_CHANNEL_MAX_SIZE];
    uint8_t received_rx_length;
    uint32_t received_drop_frame_cout;
 
-   // for transmit data to bt
+   // for response to bt
    uint8_t bt_tx_buffer[PROTOCOL_BASIC_MAX_SIZE];
    uint8_t parsing_status;
    uint16_t parsing_result_code;
@@ -236,29 +268,12 @@ static PROJECT gProject[1]                               =
 
 // -----------------------------------------------------------------------------
 // for failsafe mode
-
+#define FAILSAFE_MODE_TIME_OUT_SECOND                    30
 typedef struct
 {
-   uint8_t channel_id;
+   uint16_t channel_id;
    uint16_t value;
 } FAILSAFE_MODE_VALUE;
-
-static FAILSAFE_MODE_VALUE g_failsafe_value[SPEKTRUM_MAX_CHANNEL] =
-{
-   { SPEKTRUM_CHANNEL_ROLL,      512},
-   { SPEKTRUM_CHANNEL_PITCH,     512},
-   { SPEKTRUM_CHANNEL_YAW,       512},
-   { SPEKTRUM_CHANNEL_THROTTLE,  100},
-   { SPEKTRUM_CHANNEL_GEAR,      100},
-   { SPEKTRUM_CHANNEL_AUX_1,     512},
-   { SPEKTRUM_CHANNEL_AUX_2,     512},
-   { SPEKTRUM_CHANNEL_AUX_3,     512},
-   { SPEKTRUM_CHANNEL_AUX_4,     512},
-   { SPEKTRUM_CHANNEL_AUX_5,     512},
-   { SPEKTRUM_CHANNEL_AUX_6,     512},
-   { SPEKTRUM_CHANNEL_AUX_7,     512},
-};
-
 
 // -----------------------------------------------------------------------------
 // ...
@@ -365,11 +380,7 @@ static void serial_receiver_timer_handler(void * p_context)
    uint32_t diff_tick_count                              = 0;
    int i;
 
-   if (app_timer_cnt_get(&tick_count) != NRF_SUCCESS)
-   {
-      printf("Can't get tick count \r\n");
-      gProject->mode                                     = PROJECT_FAILED;
-   }
+   app_timer_cnt_get(&tick_count);
 
    for (i = 0; i < MAX_TIMER_COUNT; i++)
    {
@@ -421,30 +432,8 @@ static void serial_receiver_timer_handler(void * p_context)
 
 // -----------------------------------------------------------------------------
 // for timer function
-// specktrum 1024 : 22 ms
+// spektrum 1024 : 22 ms
 #define SERIAL_RX_SEND_TO_FC_TIMER                       22
-// 60 ms
-#define SERIAL_RX_COMMAND_PARSING_TIMER                  30
-// 60 ms
-#define SERIAL_RX_COMMAND_RESPONSE_TIMER                 30
-// 500 ms
-#define SERIAL_RX_COMMAND_FAILSAFE_TIMER                 100
-
-// UART
-// BAUDRATE : 125000 bps, or 1152000 bps
-// DATA     : 8 bits
-// PARITY   : NO Parity
-// stop bit : 1 stop
-
-#define SERIAL_RX_BAUDRATE                               (UART_BAUDRATE_BAUDRATE_Baud115200)
-#define DEVICE_NAME                                      "DRONE-BT-CONTROLLER"                     /**< Name of device. Will be included in the advertising data. */
-
-// -----------------------------------------------------------------------------
-#elif defined(SERIAL_RX_SPEKTRUM_2048)
-// -----------------------------------------------------------------------------
-// for timer function
-// specktrum 1024 : 22 ms
-#define SERIAL_RX_SPEKTRUM_1024_TIMER                    22
 // 60 ms
 #define SERIAL_RX_COMMAND_PARSING_TIMER                  60
 // 60 ms
@@ -452,14 +441,121 @@ static void serial_receiver_timer_handler(void * p_context)
 // 500 ms
 #define SERIAL_RX_COMMAND_FAILSAFE_TIMER                 100
 
+// -----------------------------------------------------------------------------
 // UART
 // BAUDRATE : 125000 bps, or 1152000 bps
 // DATA     : 8 bits
 // PARITY   : NO Parity
 // stop bit : 1 stop
 
+// -----------------------------------------------------------------------------
 #define SERIAL_RX_BAUDRATE                               (UART_BAUDRATE_BAUDRATE_Baud115200)
 #define DEVICE_NAME                                      "DRONE-BT-CONTROLLER"                     /**< Name of device. Will be included in the advertising data. */
+
+// -----------------------------------------------------------------------------
+// for channel protocol
+#define MAX_SPEKTRUM_CHANNEL_NUM                         7
+#define SPEKTRUM_1024_CHANID_MASK                        0xFC00
+#define SPEKTRUM_1024_SXPOS_MASK                         0x03FF
+#define SPEKTRUM_1024_CHANNEL_SHIFT_BITS                 10
+
+#define SPEKTRUM_DSM2_22MS                               0x01                    // 1024
+#define SPEKTRUM_DSM2_11MS                               0x12                    // 2048
+#define SPEKTRUM_DSMS_22MS                               0xA2                    // 2048
+#define SPEKTRUM_DSMX_11MS                               0xB2                    // 2048
+
+// struct for SPEKTRUM 1024 Protocol
+typedef struct _RX_PACKET_SPEKTRUM_1024
+{
+   uint8_t fades;
+   uint8_t system;
+   uint16_t channel[MAX_SPEKTRUM_CHANNEL_NUM];
+} __attribute__ ((__packed__)) RX_PACKET_SPEKTRUM_1024;
+
+/******************************************************************
+ *
+ * Function Name : bt_packet_to_fc_packet()
+ *   covert packet of bt to packet of fc 
+ *
+ ******************************************************************/
+static int bt_packet_to_fc_packet(uint16_t* p_bt_channel_info, uint8_t bt_channel_count, void* p_fc_packet, uint8_t* p_fc_acket_size)
+{
+   int bt_channel_index;
+   int spektrum_channel_index;
+   RX_PACKET_SPEKTRUM_1024* pRxPacketSpektrum1024        = (RX_PACKET_SPEKTRUM_1024*) p_fc_packet;
+   if (*p_fc_acket_size < sizeof(RX_PACKET_SPEKTRUM_1024))
+   {
+      return -1;
+   }
+
+   // packet size of SPEKTRUM 1024
+   *p_fc_acket_size                                      = sizeof(RX_PACKET_SPEKTRUM_1024);
+
+   // header of spektrum's 1024
+   pRxPacketSpektrum1024->fades                          = 0x0;
+   pRxPacketSpektrum1024->system                         = SPEKTRUM_DSM2_22MS;
+
+   for (bt_channel_index = 0, spektrum_channel_index = 0;
+        bt_channel_index < bt_channel_count && spektrum_channel_index < MAX_SPEKTRUM_CHANNEL_NUM;
+        bt_channel_index++, spektrum_channel_index++)
+   {
+      pRxPacketSpektrum1024->channel[spektrum_channel_index] = (SPEKTRUM_1024_CHANID_MASK & (p_bt_channel_info[bt_channel_index] >> 2)) |
+                                                               (SPEKTRUM_1024_SXPOS_MASK & p_bt_channel_info[bt_channel_index]);
+   }
+   return 0;
+}
+
+// -----------------------------------------------------------------------------
+// default value for failsafe mode ...
+static FAILSAFE_MODE_VALUE g_failsafe_value[SPEKTRUM_MAX_CHANNEL] =
+{
+   { (SPEKTRUM_CHANNEL_ROLL << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),      512},
+   { (SPEKTRUM_CHANNEL_PITCH << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),     512},
+   { (SPEKTRUM_CHANNEL_YAW << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),       512},
+   { (SPEKTRUM_CHANNEL_THROTTLE << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),  100},
+   { (SPEKTRUM_CHANNEL_GEAR << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),      100},
+   { (SPEKTRUM_CHANNEL_AUX_1 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),     512},
+   { (SPEKTRUM_CHANNEL_AUX_2 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),     512},
+   { (SPEKTRUM_CHANNEL_AUX_3 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),     512},
+   { (SPEKTRUM_CHANNEL_AUX_4 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),     512},
+   { (SPEKTRUM_CHANNEL_AUX_5 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),     512},
+   { (SPEKTRUM_CHANNEL_AUX_6 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),     512},
+   { (SPEKTRUM_CHANNEL_AUX_7 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),     512},
+};
+
+/******************************************************************
+ *
+ * Function Name : bt_packet_to_fc_packet()
+ *   covert packet of bt to packet of fc 
+ *
+ ******************************************************************/
+static int default_fc_packet(void* p_fc_packet, uint8_t* p_fc_acket_size)
+{
+   int i;
+   RX_PACKET_SPEKTRUM_1024* pRxPacketSpektrum1024        = (RX_PACKET_SPEKTRUM_1024*) p_fc_packet;
+   if (*p_fc_acket_size < sizeof(RX_PACKET_SPEKTRUM_1024))
+   {
+      return -1;
+   }
+
+   // packet size of SPEKTRUM 1024
+   *p_fc_acket_size                                      = sizeof(RX_PACKET_SPEKTRUM_1024);
+
+   // header of spektrum's 1024
+   pRxPacketSpektrum1024->fades                          = 0x0;
+   pRxPacketSpektrum1024->system                         = SPEKTRUM_DSM2_22MS;
+
+   for (i = 0; i < MAX_SPEKTRUM_CHANNEL_NUM; i++)
+   {
+      pRxPacketSpektrum1024->channel[i]                  = (g_failsafe_value[i].channel_id | g_failsafe_value[i].value);
+   }
+   return 0;
+}
+
+
+
+// -----------------------------------------------------------------------------
+#elif defined(SERIAL_RX_SPEKTRUM_2048)
 
 // -----------------------------------------------------------------------------
 #elif defined(SERIAL_RX_S_BUS)
@@ -485,7 +581,8 @@ static void serial_receiver_timer_handler(void * p_context)
 // -----------------------------------------------------------------------------
 #else
 #error "Not supported"
-#endif
+#endif      // SERIAL_RX_SPEKTRUM_1024
+#endif      // SERIAL_RECEIVER
 
 /******************************************************************
  *
@@ -493,9 +590,28 @@ static void serial_receiver_timer_handler(void * p_context)
  *
  *
  ******************************************************************/
+#define UART_RETRY_SEND_COUNT                            1
 static void timer_send_msg_to_fc_controller(void* pdata)
 {
-
+   int i;
+   int retry_count                                       = 0;
+   if (gProject->internal_tx_packet_size > 0)
+   {
+      memcpy(gProject->fc_tx_buffer, gProject->internal_tx_buffer, gProject->internal_tx_packet_size);
+      gProject->fc_tx_packet_size                        = gProject->internal_tx_packet_size;
+      gProject->internal_tx_packet_size                  = 0;
+   }
+   for (i = 0; i < (gProject->fc_tx_packet_size); i++)
+   {
+      retry_count                                        = 0;
+      while(app_uart_put(gProject->fc_tx_buffer[i]) != NRF_SUCCESS)
+      {
+         if (UART_RETRY_SEND_COUNT < retry_count++)
+         {
+            return;
+         }
+      }
+   }
 }
 
 /******************************************************************
@@ -508,6 +624,8 @@ static void timer_bt_command_parser(void* pdata)
 {
    BT_PROTOCOL_COMMAND* pbtProtocolCommand               = NULL;
    BT_PROTOCOL_COMMAND* pbtProtocolResponse              = NULL;
+   BT_PROTOCOL_DATA* pbtProtocolChannelData              = NULL;
+   uint8_t rx_data_length                                = gProject->received_rx_length;
 
    if (gProject->parsing_status != 0)
    {
@@ -541,14 +659,81 @@ static void timer_bt_command_parser(void* pdata)
       {
          case PROTOCOL_REGISTER_MESSAGE :
             pbtProtocolResponse->command                 = PROTOCOL_REGISTER_RESPONSE;
+
+            // check internal packet size
+            if (rx_data_length != PROTOCOL_BASIC_MAX_SIZE)
+            {
+               gProject->parsing_result_code             = ERROR_INTERNAL_PACKET_SIZE;
+
+               // error code
+               pbtProtocolResponse->option_1_high        = 0;
+               pbtProtocolResponse->option_1_low         = ERROR_INTERNAL_PACKET_SIZE;
+               return;
+            }
+
+            // check packet size
+            if (pbtProtocolCommand->size != PROTOCOL_BASIC_MAX_SIZE)
+            {
+               gProject->parsing_result_code             = ERROR_PACKET_SIZE;
+
+               // error code
+               pbtProtocolResponse->option_1_high        = 0;
+               pbtProtocolResponse->option_1_low         = ERROR_PACKET_SIZE;
+               return;
+            }
             break;
 
          case PROTOCOL_ALIVE_MESSAGE :
             pbtProtocolResponse->command                 = PROTOCOL_ALIVE_RESPONSE;
+
+            // check internal packet size
+            if (rx_data_length != PROTOCOL_BASIC_MAX_SIZE)
+            {
+               gProject->parsing_result_code             = ERROR_INTERNAL_PACKET_SIZE;
+
+               // error code
+               pbtProtocolResponse->option_1_high        = 0;
+               pbtProtocolResponse->option_1_low         = ERROR_INTERNAL_PACKET_SIZE;
+               return;
+            }
+
+            // check packet size
+            if (pbtProtocolCommand->size != PROTOCOL_BASIC_MAX_SIZE)
+            {
+               gProject->parsing_result_code             = ERROR_PACKET_SIZE;
+
+               // error code
+               pbtProtocolResponse->option_1_high        = 0;
+               pbtProtocolResponse->option_1_low         = ERROR_PACKET_SIZE;
+               return;
+            }
+            break;
             break;
 
          case PROTOCOL_CHANNEL_MESSAGE :
             pbtProtocolResponse->command                 = PROTOCOL_UNKNOWN_RESPONSE;
+
+            // check internal packet size
+            if (rx_data_length != PROTOCOL_CHANNEL_MAX_SIZE)
+            {
+               gProject->parsing_result_code             = ERROR_INTERNAL_PACKET_SIZE;
+
+               // error code
+               pbtProtocolResponse->option_1_high        = 0;
+               pbtProtocolResponse->option_1_low         = ERROR_INTERNAL_PACKET_SIZE;
+               return;
+            }
+
+            // check packet size
+            if (pbtProtocolCommand->size != PROTOCOL_CHANNEL_MAX_SIZE)
+            {
+               gProject->parsing_result_code             = ERROR_PACKET_SIZE;
+
+               // error code
+               pbtProtocolResponse->option_1_high        = 0;
+               pbtProtocolResponse->option_1_low         = ERROR_PACKET_SIZE;
+               return;
+            }
             break;
 
          default :
@@ -598,16 +783,28 @@ static void timer_bt_command_parser(void* pdata)
             {
                // register client
                gProject->register_client                 = 1;
+               app_timer_cnt_get(&gProject->last_alive_tick_count);
                return;
             }
             break;
 
          case PROTOCOL_ALIVE_MESSAGE :
-            // alive time 관련 처리
+            gProject->client_alive_count                 = (pbtProtocolCommand->option_1_high << 24) |
+                                                           (pbtProtocolCommand->option_1_low  << 16) |
+                                                           (pbtProtocolCommand->option_2_high << 8) |
+                                                           (pbtProtocolCommand->option_1_low);
+            app_timer_cnt_get(&gProject->last_alive_tick_count);
             return;
 
          case PROTOCOL_CHANNEL_MESSAGE :
-            // channel information parsing
+            pbtProtocolChannelData                       = (BT_PROTOCOL_DATA*) gProject->bt_rx_buffer;
+            gProject->internal_tx_packet_size            = SERIAL_RX_TRANSMITTER_MAX_SIZE;
+            if (bt_packet_to_fc_packet(&(pbtProtocolChannelData->channel_1), SPEKTRUM_MAX_CHANNEL,
+                                       (void*) gProject->internal_tx_buffer, &gProject->internal_tx_packet_size) < 0)
+            {
+            }
+            app_timer_cnt_get(&gProject->last_alive_tick_count);
+            SET_PROJECT_NORMAL_STATUS(gProject->mode);
             return;
 
          default :
@@ -632,11 +829,6 @@ static void timer_bt_response(void* pdata)
 {
    uint32_t err_code;
 
-#if 0
-   BT_PROTOCOL_COMMAND* pbtProtocolResponse              = NULL;
-   pbtProtocolResponse                                   = (BT_PROTOCOL_COMMAND*) gProject->bt_tx_buffer;
-#endif
-
    if (gProject->parsing_status != 0)
    {
       return;
@@ -657,444 +849,22 @@ static void timer_bt_response(void* pdata)
  ******************************************************************/
 static void timer_failsafe_mode(void* pdata)
 {
+   uint32_t diff_tick_count                              = 0;
+   uint32_t cur_tick_count                               = 0;
 
+   app_timer_cnt_get(&cur_tick_count);
+   app_timer_cnt_diff_compute(cur_tick_count, gProject->last_alive_tick_count, &diff_tick_count);
+
+   if (TICK_COUNT_TO_SECOND(diff_tick_count) > FAILSAFE_MODE_TIME_OUT_SECOND)
+   {
+      if (IS_PROJECT_FAILSAFE_MODE(gProject->mode) == 0)
+      {
+         gProject->enter_failsafe_mode_tick_count        = cur_tick_count;
+      }
+
+      SET_PROJECT_FAILSAFE_MODE(gProject->mode);
+   }
 }
-
-
-
-
-#if 1
-
-uint8_t update_receiver_command()
-{
-#if 0
-   uint32_t err_code;
-   BT_PROTOCOL_DATA* pProtocolData                          = (BT_PROTOCOL_DATA*) g_bt_rx_command;
-   BT_PROTOCOL_RESPONSE reponse;
-
-   reponse.version_high                                     = pProtocolData->version_high;
-   reponse.version_low                                      = pProtocolData->version_low;
-   reponse.command                                          = PROTOCOL_RESPONSE_FROM_TRANSMITTER;
-   reponse.size                                             = sizeof(BT_PROTOCOL_RESPONSE);
-   reponse.status                                           = 0;
-   reponse.crc                                              = pProtocolData->crc;
-
-   err_code                                                 = ble_nus_string_send(&m_nus, (uint8_t *) &reponse, sizeof(BT_PROTOCOL_RESPONSE));
-//   err_code                                                 = ble_nus_string_send(&m_nus, (uint8_t *) "test data   ", 9);
-   if (err_code != NRF_ERROR_INVALID_STATE)
-   {
-      APP_ERROR_CHECK(err_code);
-   }
-#endif
-   return 0;
-}
-#else
-uint8_t update_receiver_command()
-{
-static uint8_t debug_led                                 = 0;
-   uint16_t header                                       = (g_bt_rx_command[0] << 8) | g_bt_rx_command[1];
-
-   if (header != 0x2392)
-   {
-      nrf_gpio_pin_write(WAVESHARE_LED_1, 1);
-      return -1;
-   }
-   
-   g_rx_channel[RX_CHANNEL_ROLL].value                   = (g_bt_rx_command[2] << 8) | g_bt_rx_command[3];
-   g_rx_channel[RX_CHANNEL_PITCH].value                  = (g_bt_rx_command[4] << 8) | g_bt_rx_command[5];
-   g_rx_channel[RX_CHANNEL_THROTTLE].value               = (g_bt_rx_command[6] << 8) | g_bt_rx_command[7];
-   g_rx_channel[RX_CHANNEL_YAW].value                    = (g_bt_rx_command[8] << 8) | g_bt_rx_command[9];
-   g_rx_channel[RX_CHANNEL_ARMING].value                 = (g_bt_rx_command[10] << 8) | g_bt_rx_command[11];
-
-   if (g_rx_channel[RX_CHANNEL_ARMING].value != 0)
-   {
-      g_rx_channel[RX_CHANNEL_ARMING].value              = 1023;
-   }
-
-   if (debug_led == 0)
-   {
-      debug_led                                          = 1;
-   }
-   else
-   {
-      debug_led                                          = 0;
-   }
-   nrf_gpio_pin_write(WAVESHARE_LED_2, debug_led);
-   return 0;
-}
-#endif
-
-
-
-#if defined(SERIAL_RX_SPEKTRUM_1024)
-
-#define MASK_1024_CHANID                                 0xFC00
-#define MASK_1024_SXPOS                                  0x03FF
-
-#define SPEKTRUM_1024_CHANNEL_SHIFT_BITS                 10
-
-#define MAX_CHANNEL_COUNT                                7
-
-#define DSM2_22MS                                        0x01                    // 1024
-#define DSM2_11MS                                        0x12                    // 2048
-#define DSMS_22MS                                        0xA2                    // 2048
-#define DSMX_11MS                                        0xB2                    // 2048
-
-#if 1
-#define SPEKTRUM_CHANNEL_THROTTLE                        3
-#define SPEKTRUM_CHANNEL_AILERON                         0
-#define SPEKTRUM_CHANNEL_ELEVATOR                        1
-#define SPEKTRUM_CHANNEL_RUDDER                          2
-#else
-#define SPEKTRUM_CHANNEL_THROTTLE                        0
-#define SPEKTRUM_CHANNEL_AILERON                         1
-#define SPEKTRUM_CHANNEL_ELEVATOR                        2
-#define SPEKTRUM_CHANNEL_RUDDER                          3
-#endif
-#define SPEKTRUM_CHANNEL_GEAR                            4
-#define SPEKTRUM_CHANNEL_AUX_1                           5
-#define SPEKTRUM_CHANNEL_AUX_2                           6
-#define SPEKTRUM_CHANNEL_AUX_3                           7
-#define SPEKTRUM_CHANNEL_AUX_4                           8
-#define SPEKTRUM_CHANNEL_AUX_5                           9
-#define SPEKTRUM_CHANNEL_AUX_6                           10
-#define SPEKTRUM_CHANNEL_AUX_7                           11
-
-#if 0
-typedef struct
-{
-   uint8_t fades;
-   uint8_t system;
-   uint16_t channel[MAX_CHANNEL_COUNT];
-} RX_PACKET_SPEKTRUM_1024;
-
-#endif
-
-#define UART_RETRY_SEND_COUNT                            5
-uint8_t send_receiver_command()
-{
-
-#if 0
-   RX_PACKET_SPEKTRUM_1024 packet;
-   uint8_t retry_count;
-   uint8_t* stream_packet                                = (uint8_t*) &packet;
-   int i;
-   memset(&packet, 0, sizeof(RX_PACKET_SPEKTRUM_1024));
-
-   UNUSED_VARIABLE(retry_count);
-   UNUSED_VARIABLE(i);
-
-   // missed frames for remote
-   // always is null
-   packet.fades                                          = 0;
-   packet.system                                         = 0;
-
-   // throttle (드론 상승, 하강)
-   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_0]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_THROTTLE << SPEKTRUM_1024_CHANNEL_SHIFT_BITS))       |
-                                                           (g_rx_channel[RX_CHANNEL_THROTTLE].value & MASK_1024_SXPOS);
-
-   // Aileron (좌측 이동, 우측 이동)
-   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_1]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_AILERON << SPEKTRUM_1024_CHANNEL_SHIFT_BITS))        |
-                                                           (g_rx_channel[RX_CHANNEL_ROLL].value & MASK_1024_SXPOS);
-
-   // Elevator (전진, 후진)
-   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_2]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_ELEVATOR << SPEKTRUM_1024_CHANNEL_SHIFT_BITS))       |
-                                                           (g_rx_channel[RX_CHANNEL_PITCH].value & MASK_1024_SXPOS);
-
-   // Rudder (시계방향 회전, 반 시계방향 회전)
-   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_3]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_RUDDER << SPEKTRUM_1024_CHANNEL_SHIFT_BITS))         |
-                                                           (g_rx_channel[RX_CHANNEL_YAW].value & MASK_1024_SXPOS);
-
-   // GEAR
-   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_4]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_GEAR << SPEKTRUM_1024_CHANNEL_SHIFT_BITS))           |
-                                                           (g_rx_channel[RX_CHANNEL_ARMING].value & MASK_1024_SXPOS);
-   // ADC 1
-   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_5]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_AUX_2 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS))          |
-                                                           (0x200 & MASK_1024_SXPOS);
-
-   // ADC 2
-   packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6]       = (MASK_1024_CHANID & (SPEKTRUM_CHANNEL_AUX_3 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS))          |
-                                                           (0x200 & MASK_1024_SXPOS);
-
-   static uint8_t debug_count                            = 0;
-   static uint8_t led_count                              = 0;
-   ++debug_count;
-
-   if ((debug_count % 100) == 0)
-   {
-      debug_count                                        = 0;
-      if (led_count == 0)
-      {
-         led_count                                       = 1;
-      }
-      else
-      {
-         led_count                                       = 0;
-      }
-      nrf_gpio_pin_write(WAVESHARE_LED_3, led_count);
-   }
-
-#if 0
-   {
-      printf("\r\n");
-      for (i = 0; i < sizeof(RX_PACKET_SPEKTRUM_1024); i++)
-      {
-         printf("[%02x] ", *(stream_packet + i));
-      }
-  }
-#endif
-
-#if 1
-      retry_count                                        = 0;
-      while(app_uart_put(*(stream_packet + 1)) != NRF_SUCCESS)
-      {
-         if (UART_RETRY_SEND_COUNT < retry_count++)
-         {
-            return 1;
-         }
-      }
-      retry_count                                        = 0;
-      while(app_uart_put(*(stream_packet + 0)) != NRF_SUCCESS)
-      {
-         if (UART_RETRY_SEND_COUNT < retry_count++)
-         {
-            return 1;
-         }
-      }
-
-      retry_count                                        = 0;
-      while(app_uart_put(*(stream_packet + 3)) != NRF_SUCCESS)
-      {
-         if (UART_RETRY_SEND_COUNT < retry_count++)
-         {
-            return 1;
-         }
-      }
-      retry_count                                        = 0;
-      while(app_uart_put(*(stream_packet + 2)) != NRF_SUCCESS)
-      {
-         if (UART_RETRY_SEND_COUNT < retry_count++)
-         {
-            return 1;
-         }
-      }
-
-      retry_count                                        = 0;
-      while(app_uart_put(*(stream_packet + 5)) != NRF_SUCCESS)
-      {
-         if (UART_RETRY_SEND_COUNT < retry_count++)
-         {
-            return 1;
-         }
-      }
-      retry_count                                        = 0;
-      while(app_uart_put(*(stream_packet + 4)) != NRF_SUCCESS)
-      {
-         if (UART_RETRY_SEND_COUNT < retry_count++)
-         {
-            return 1;
-         }
-      }
-
-      retry_count                                        = 0;
-      while(app_uart_put(*(stream_packet + 7)) != NRF_SUCCESS)
-      {
-         if (UART_RETRY_SEND_COUNT < retry_count++)
-         {
-            return 1;
-         }
-      }
-      retry_count                                        = 0;
-      while(app_uart_put(*(stream_packet + 6)) != NRF_SUCCESS)
-      {
-         if (UART_RETRY_SEND_COUNT < retry_count++)
-         {
-            return 1;
-         }
-      }
-
-      retry_count                                        = 0;
-      while(app_uart_put(*(stream_packet + 9)) != NRF_SUCCESS)
-      {
-         if (UART_RETRY_SEND_COUNT < retry_count++)
-         {
-            return 1;
-         }
-      }
-      retry_count                                        = 0;
-      while(app_uart_put(*(stream_packet + 8)) != NRF_SUCCESS)
-      {
-         if (UART_RETRY_SEND_COUNT < retry_count++)
-         {
-            return 1;
-         }
-      }
-
-      retry_count                                        = 0;
-      while(app_uart_put(*(stream_packet + 11)) != NRF_SUCCESS)
-      {
-         if (UART_RETRY_SEND_COUNT < retry_count++)
-         {
-            return 1;
-         }
-      }
-      retry_count                                        = 0;
-      while(app_uart_put(*(stream_packet + 10)) != NRF_SUCCESS)
-      {
-         if (UART_RETRY_SEND_COUNT < retry_count++)
-         {
-            return 1;
-         }
-      }
-
-      retry_count                                        = 0;
-      while(app_uart_put(*(stream_packet + 13)) != NRF_SUCCESS)
-      {
-         if (UART_RETRY_SEND_COUNT < retry_count++)
-         {
-            return 1;
-         }
-      }
-      retry_count                                        = 0;
-      while(app_uart_put(*(stream_packet + 12)) != NRF_SUCCESS)
-      {
-         if (UART_RETRY_SEND_COUNT < retry_count++)
-         {
-            return 1;
-         }
-      }
-
-      retry_count                                        = 0;
-      while(app_uart_put(*(stream_packet + 15)) != NRF_SUCCESS)
-      {
-         if (UART_RETRY_SEND_COUNT < retry_count++)
-         {
-            return 1;
-         }
-      }
-      retry_count                                        = 0;
-      while(app_uart_put(*(stream_packet + 14)) != NRF_SUCCESS)
-      {
-         if (UART_RETRY_SEND_COUNT < retry_count++)
-         {
-            return 1;
-         }
-      }
-
-#else
-   for (i = 0; i < sizeof(RX_PACKET_SPEKTRUM_1024); i++)
-   {
-      retry_count                                        = 0;
-      while(app_uart_put(*(stream_packet + i)) != NRF_SUCCESS)
-      {
-         if (UART_RETRY_SEND_COUNT < retry_count++)
-         {
-            return 1;
-         }
-      }
-   }
-#endif
-
-#if 0
-   {
-      printf("\r\n");
-      printf("[%02x] [%02x] ",   packet.fades, packet.system);
-      printf("[%02x] [%02x] : ", (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_0] >> 8) & 0xFF),
-                                 (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_0]     ) & 0xFF));
-      printf("[%02x] [%02x] : ", (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_1] >> 8) & 0xFF),
-                                 (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_1]     ) & 0xFF));
-      printf("[%02x] [%02x] : ", (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_2] >> 8) & 0xFF),
-                                 (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_2]     ) & 0xFF));
-      printf("[%02x] [%02x] : ", (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_3] >> 8) & 0xFF),
-                                 (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_3]     ) & 0xFF));
-      printf("[%02x] [%02x] : ", (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_4] >> 8) & 0xFF),
-                                 (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_4]     ) & 0xFF));
-      printf("[%02x] [%02x] : ", (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_5] >> 8) & 0xFF),
-                                 (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_5]     ) & 0xFF));
-      printf("[%02x] [%02x] ",   (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6] >> 8) & 0xFF),
-                                 (uint8_t) ((packet.channel[RX_PACKET_SPEKTRUM_CHANNEL_ID_6]     ) & 0xFF));
-   }
-#endif
-#endif
-
-   return 0;
-}
-
-#elif defined(SERIAL_RX_SPEKTRUM_2048)
-
-// Does not porting...
-
-#elif defined(SERIAL_RX_S_BUS)
-
-// Does not porting...
-
-#elif defined(SERIAL_RX_SUMD)
-
-// Does not porting...
-
-#elif defined(SERIAL_RX_SUMH)
-
-// Does not porting...
-
-#elif defined(SERIAL_RX_MODE_B)
-
-// Does not porting...
-
-#elif defined(SERIAL_RX_MODE_B_BJ01)
-
-// Does not porting...
-
-#elif defined(SERIAL_RX_IBUS)
-
-// Does not porting...
-
-#elif defined(SERIAL_RX_MSP)
-
-// Does not porting...
-
-#else
-
-// Does not supported ...
-
-#endif
-
-#endif   // SERIAL_RECEIVER
-
-#if 0
-#define IS_SRVC_CHANGED_CHARACT_PRESENT 0                                           /**< Include the service_changed characteristic. If not enabled, the server's database cannot be changed for the lifetime of the device. */
-
-#define CENTRAL_LINK_COUNT              0                                           /**< Number of central links used by the application. When changing this number remember to adjust the RAM settings*/
-#define PERIPHERAL_LINK_COUNT           1                                           /**< Number of peripheral links used by the application. When changing this number remember to adjust the RAM settings*/
-
-#define NUS_SERVICE_UUID_TYPE           BLE_UUID_TYPE_VENDOR_BEGIN                  /**< UUID type for the Nordic UART Service (vendor specific). */
-
-#define APP_ADV_INTERVAL                64                                          /**< The advertising interval (in units of 0.625 ms. This value corresponds to 40 ms). */
-#define APP_ADV_TIMEOUT_IN_SECONDS      180                                         /**< The advertising timeout (in units of seconds). */
-
-#define APP_TIMER_PRESCALER             0                                           /**< Value of the RTC1 PRESCALER register. */
-#define APP_TIMER_OP_QUEUE_SIZE         4                                           /**< Size of timer operation queues. */
-
-#define MIN_CONN_INTERVAL               MSEC_TO_UNITS(20, UNIT_1_25_MS)             /**< Minimum acceptable connection interval (20 ms), Connection interval uses 1.25 ms units. */
-#define MAX_CONN_INTERVAL               MSEC_TO_UNITS(75, UNIT_1_25_MS)             /**< Maximum acceptable connection interval (75 ms), Connection interval uses 1.25 ms units. */
-#define SLAVE_LATENCY                   0                                           /**< Slave latency. */
-#define CONN_SUP_TIMEOUT                MSEC_TO_UNITS(4000, UNIT_10_MS)             /**< Connection supervisory timeout (4 seconds), Supervision Timeout uses 10 ms units. */
-#define FIRST_CONN_PARAMS_UPDATE_DELAY  APP_TIMER_TICKS(5000, APP_TIMER_PRESCALER)  /**< Time from initiating event (connect or start of notification) to first time sd_ble_gap_conn_param_update is called (5 seconds). */
-#define NEXT_CONN_PARAMS_UPDATE_DELAY   APP_TIMER_TICKS(30000, APP_TIMER_PRESCALER) /**< Time between each call to sd_ble_gap_conn_param_update after the first call (30 seconds). */
-#define MAX_CONN_PARAMS_UPDATE_COUNT    3                                           /**< Number of attempts before giving up the connection parameter negotiation. */
-
-#define START_STRING                                     "Start...\r\n"
-
-#define DEAD_BEEF                       0xDEADBEEF                                  /**< Value used as error code on stack dump, can be used to identify stack location on stack unwind. */
-
-#define UART_TX_BUF_SIZE                256                                         /**< UART TX buffer size. */
-#define UART_RX_BUF_SIZE                256                                         /**< UART RX buffer size. */
-
-static ble_nus_t                        m_nus;                                      /**< Structure to identify the Nordic UART Service. */
-static uint16_t                         m_conn_handle = BLE_CONN_HANDLE_INVALID;    /**< Handle of the current connection. */
-
-static ble_uuid_t                       m_adv_uuids[] = {{BLE_UUID_NUS_SERVICE, NUS_SERVICE_UUID_TYPE}};  /**< Universally unique service identifier. */
-#endif
-
 
 
 
@@ -1597,8 +1367,7 @@ int main(void)
 
    // clear variable ...
    memset(gProject, 0, sizeof(gProject));
-
-   gProject->mode                                        = PROJECT_INIT_STATUS;
+   SET_PROJECT_INIT_STATUS(gProject->mode);
 
    // Initialize.
    APP_TIMER_INIT(APP_TIMER_PRESCALER, APP_TIMER_OP_QUEUE_SIZE, false);
@@ -1637,7 +1406,7 @@ int main(void)
    if (err_code != NRF_SUCCESS)
    {
       printf("ble_advertising_start() failed : %d \r\n", (int) err_code);
-      gProject->mode                                     = PROJECT_FAILED;
+      SET_PROJECT_FAIL_STATUS(gProject->mode);
    }
    APP_ERROR_CHECK(err_code);
 
@@ -1651,11 +1420,16 @@ int main(void)
       printf("Can't start app timer \r\n");
    }
 
+   // make default packet
+   gProject->fc_tx_packet_size                        = SERIAL_RX_TRANSMITTER_MAX_SIZE;
+   default_fc_packet(gProject->fc_tx_buffer, &gProject->fc_tx_packet_size);
+
    add_timer(timer_send_msg_to_fc_controller, SERIAL_RX_SEND_TO_FC_TIMER, -1, NULL);
    add_timer(timer_bt_command_parser, SERIAL_RX_COMMAND_PARSING_TIMER, -1, NULL);
    add_timer(timer_bt_response, SERIAL_RX_COMMAND_RESPONSE_TIMER, -1, NULL);
    add_timer(timer_failsafe_mode, SERIAL_RX_COMMAND_FAILSAFE_TIMER, -1, NULL);
 #endif
+   SET_PROJECT_READY_STATUS(gProject->mode);
 
    // Enter main loop.
    for (;;)
