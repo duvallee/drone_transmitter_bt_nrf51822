@@ -43,6 +43,13 @@
 #define SERIAL_RECEIVER
 #define WAVESHARE_BOARD
 
+// for debugging
+#define DEBUG_OUTPUT_BT_RECEIVED_DATA
+#define DEBUG_OUTPUT_BT_COMMAND_PARSER
+#define DEBUG_OUTPUT_BT_CHANNEL_PARSER
+#define DEBUG_OUTPUT_FC_CHANNEL_DATA
+#define DEBUG_OUTPUT_BT_RESPONSE
+
 // -----------------------------------------------------------------------------
 // for debugging...
 #if defined(WAVESHARE_BOARD)
@@ -485,6 +492,9 @@ static int bt_packet_to_fc_packet(uint16_t* p_bt_channel_info, uint8_t bt_channe
    RX_PACKET_SPEKTRUM_1024* pRxPacketSpektrum1024        = (RX_PACKET_SPEKTRUM_1024*) p_fc_packet;
    if (*p_fc_acket_size < sizeof(RX_PACKET_SPEKTRUM_1024))
    {
+#if defined(DEBUG_OUTPUT_BT_CHANNEL_PARSER)
+      NRF_LOG_PRINTF("wrong channel data : %d less than %d \r\n", *p_fc_acket_size, sizeof(RX_PACKET_SPEKTRUM_1024));
+#endif
       return -1;
    }
 
@@ -501,6 +511,12 @@ static int bt_packet_to_fc_packet(uint16_t* p_bt_channel_info, uint8_t bt_channe
    {
       pRxPacketSpektrum1024->channel[spektrum_channel_index] = (SPEKTRUM_1024_CHANID_MASK & (p_bt_channel_info[bt_channel_index] >> 2)) |
                                                                (SPEKTRUM_1024_SXPOS_MASK & p_bt_channel_info[bt_channel_index]);
+
+#if defined(DEBUG_OUTPUT_BT_CHANNEL_PARSER)
+      NRF_LOG_PRINTF("[%d] : c(%d), v(%d) \r\n", spektrum_channel_index,
+               (SPEKTRUM_1024_CHANID_MASK & (p_bt_channel_info[bt_channel_index] >> 2)),
+               (SPEKTRUM_1024_SXPOS_MASK & p_bt_channel_info[bt_channel_index]));
+#endif
    }
    return 0;
 }
@@ -595,6 +611,16 @@ static void timer_send_msg_to_fc_controller(void* pdata)
 {
    int i;
    int retry_count                                       = 0;
+#if defined(DEBUG_OUTPUT_FC_CHANNEL_DATA)
+// To output string per about 2 seconds
+static int msg_output_count                              = 0;
+
+   if (((++msg_output_count) % 90) == 0)
+   {
+      NRF_LOG_PRINTF("send packet to the FC \r\n");
+   }
+#endif
+
    if (gProject->internal_tx_packet_size > 0)
    {
       memcpy(gProject->fc_tx_buffer, gProject->internal_tx_buffer, gProject->internal_tx_packet_size);
@@ -610,8 +636,23 @@ static void timer_send_msg_to_fc_controller(void* pdata)
          {
             return;
          }
+#if defined(DEBUG_OUTPUT_FC_CHANNEL_DATA)
+         if (((msg_output_count) % 90) == 0)
+         {
+            NRF_LOG_PRINTF("[");
+            NRF_LOG_HEX(gProject->fc_tx_buffer[i]);
+            NRF_LOG_PRINTF("] ");
+         }
+#endif
       }
    }
+#if defined(DEBUG_OUTPUT_FC_CHANNEL_DATA)
+   if (((msg_output_count) % 90) == 0)
+   {
+      NRF_LOG_PRINTF("\r\n");
+   }
+#endif
+
 }
 
 /******************************************************************
@@ -629,6 +670,9 @@ static void timer_bt_command_parser(void* pdata)
 
    if (gProject->parsing_status != 0)
    {
+#if defined(DEBUG_OUTPUT_BT_COMMAND_PARSER)
+      NRF_LOG_PRINTF("Does not process previous command !!! \r\n");
+#endif
       return;
    }
 
@@ -668,6 +712,9 @@ static void timer_bt_command_parser(void* pdata)
                // error code
                pbtProtocolResponse->option_1_high        = 0;
                pbtProtocolResponse->option_1_low         = ERROR_INTERNAL_PACKET_SIZE;
+#if defined(DEBUG_OUTPUT_BT_COMMAND_PARSER)
+               NRF_LOG_PRINTF("Wrong size or mismathed size from size of receive from bt(register cmd) \r\n");
+#endif
                return;
             }
 
@@ -679,6 +726,9 @@ static void timer_bt_command_parser(void* pdata)
                // error code
                pbtProtocolResponse->option_1_high        = 0;
                pbtProtocolResponse->option_1_low         = ERROR_PACKET_SIZE;
+#if defined(DEBUG_OUTPUT_BT_COMMAND_PARSER)
+               NRF_LOG_PRINTF("Wrong packet size (register cmd) \r\n");
+#endif
                return;
             }
             break;
@@ -694,6 +744,9 @@ static void timer_bt_command_parser(void* pdata)
                // error code
                pbtProtocolResponse->option_1_high        = 0;
                pbtProtocolResponse->option_1_low         = ERROR_INTERNAL_PACKET_SIZE;
+#if defined(DEBUG_OUTPUT_BT_COMMAND_PARSER)
+               NRF_LOG_PRINTF("Wrong size or mismathed size from size of receive from bt (alive msg) \r\n");
+#endif
                return;
             }
 
@@ -705,6 +758,9 @@ static void timer_bt_command_parser(void* pdata)
                // error code
                pbtProtocolResponse->option_1_high        = 0;
                pbtProtocolResponse->option_1_low         = ERROR_PACKET_SIZE;
+#if defined(DEBUG_OUTPUT_BT_COMMAND_PARSER)
+               NRF_LOG_PRINTF("Wrong packet size (alive msg) \r\n");
+#endif
                return;
             }
             break;
@@ -721,6 +777,9 @@ static void timer_bt_command_parser(void* pdata)
                // error code
                pbtProtocolResponse->option_1_high        = 0;
                pbtProtocolResponse->option_1_low         = ERROR_INTERNAL_PACKET_SIZE;
+#if defined(DEBUG_OUTPUT_BT_COMMAND_PARSER)
+               NRF_LOG_PRINTF("Wrong size or mismathed size from size of receive from bt (channel msg) \r\n");
+#endif
                return;
             }
 
@@ -732,6 +791,9 @@ static void timer_bt_command_parser(void* pdata)
                // error code
                pbtProtocolResponse->option_1_high        = 0;
                pbtProtocolResponse->option_1_low         = ERROR_PACKET_SIZE;
+#if defined(DEBUG_OUTPUT_BT_COMMAND_PARSER)
+               NRF_LOG_PRINTF("Wrong packet size (channel msg) \r\n");
+#endif
                return;
             }
             break;
@@ -743,6 +805,9 @@ static void timer_bt_command_parser(void* pdata)
             // error code
             pbtProtocolResponse->option_1_high           = 0;
             pbtProtocolResponse->option_1_low            = ERROR_UNKNOWN_COMMAND;
+#if defined(DEBUG_OUTPUT_BT_COMMAND_PARSER)
+            NRF_LOG_PRINTF("unknown command \r\n");
+#endif
             return;
       }
 
@@ -754,6 +819,9 @@ static void timer_bt_command_parser(void* pdata)
          // error code
          pbtProtocolResponse->option_1_high              = 0;
          pbtProtocolResponse->option_1_low               = ERROR_RESPONSE_VERSION;
+#if defined(DEBUG_OUTPUT_BT_COMMAND_PARSER)
+         NRF_LOG_PRINTF("mismatched version : %d, %d \r\n", pbtProtocolCommand->version_high, PROTOCOL_HEADER_HIGH_VERSION);
+#endif
          return;
       }
 
@@ -764,6 +832,9 @@ static void timer_bt_command_parser(void* pdata)
          // error code
          pbtProtocolResponse->option_1_high              = 0;
          pbtProtocolResponse->option_1_low               = ERROR_RESPONSE_VERSION;
+#if defined(DEBUG_OUTPUT_BT_COMMAND_PARSER)
+         NRF_LOG_PRINTF("mismatched version : %d, %d \r\n", pbtProtocolCommand->version_low, PROTOCOL_HEADER_LOW_VERSION);
+#endif
          return;
       }
 
@@ -777,6 +848,9 @@ static void timer_bt_command_parser(void* pdata)
                // error code
                pbtProtocolResponse->option_1_high        = 0;
                pbtProtocolResponse->option_1_low         = ERROR_ALREADY_REGISTERED;
+#if defined(DEBUG_OUTPUT_BT_COMMAND_PARSER)
+               NRF_LOG_PRINTF("already register \r\n");
+#endif
                return;
             }
             else
@@ -834,9 +908,27 @@ static void timer_bt_response(void* pdata)
       return;
    }
 
+#if defined(DEBUG_OUTPUT_BT_RESPONSE)
+   {
+      int i;
+
+      NRF_LOG_PRINTF("BT RESPONSE \r\n");
+      for (i = 0; i < PROTOCOL_BASIC_MAX_SIZE; i++)
+      {
+         NRF_LOG_PRINTF("[");
+         NRF_LOG_HEX(gProject->bt_tx_buffer[i]);
+         NRF_LOG_PRINTF("] ");
+      }
+      NRF_LOG_PRINTF("\r\n");
+   }
+#endif
+
    err_code                                              = ble_nus_string_send(&m_nus, gProject->bt_tx_buffer, PROTOCOL_BASIC_MAX_SIZE);
    if (err_code != NRF_SUCCESS)
    {
+#if defined(DEBUG_OUTPUT_BT_RESPONSE)
+      NRF_LOG_PRINTF("ble_nus_string_send() failed : %d \r\n", err_code);
+#endif
    }
    gProject->parsing_status                              = 0;
 }
@@ -938,9 +1030,22 @@ static void nus_data_handler(ble_nus_t * p_nus, uint8_t * p_data, uint16_t lengt
 
    gProject->received_rx_length                       = (length > PROTOCOL_CHANNEL_MAX_SIZE) ? (PROTOCOL_CHANNEL_MAX_SIZE) : (length);
 
+#if defined(DEBUG_OUTPUT_BT_RECEIVED_DATA)
+   NRF_LOG_PRINTF("BT Received Data : %d bytes \r\n", gProject->received_rx_length);
+#endif
+
    for (i = 0; i < gProject->received_rx_length; i++)
    {
       gProject->bt_rx_buffer[i]                       = *(p_data + i);
+
+#if defined(DEBUG_OUTPUT_BT_RECEIVED_DATA)
+      NRF_LOG_PRINTF("[");
+      NRF_LOG_HEX(gProject->bt_rx_buffer[i]);
+      NRF_LOG_PRINTF("] ");
+#endif      
+#if defined(DEBUG_OUTPUT_BT_RECEIVED_DATA)
+      NRF_LOG_PRINTF("\r\n");
+#endif
    }
 }
 /**@snippet [Handling the data received over BLE] */
@@ -1397,15 +1502,16 @@ int main(void)
    nrf_gpio_pin_write(WAVESHARE_LED_5, 0);
 #endif
 
-#if !defined(SERIAL_RECEIVER)
-   printf("%s", start_string);
-#else
-   printf("program start \r\n ");
-#endif
+   APP_ERROR_CHECK(NRF_LOG_INIT());
+   NRF_LOG_PRINTF("Drone Remote Controller ver : %d.%d.%d  \r\n",
+                   (PROTOCOL_HEADER_HIGH_VERSION >> 4),
+                   (PROTOCOL_HEADER_HIGH_VERSION & 0xF),
+                   PROTOCOL_HEADER_LOW_VERSION);
+
    err_code                                              = ble_advertising_start(BLE_ADV_MODE_FAST);
    if (err_code != NRF_SUCCESS)
    {
-      printf("ble_advertising_start() failed : %d \r\n", (int) err_code);
+      NRF_LOG_PRINTF("ble_advertising_start() failed : %d \r\n", (int) err_code);
       SET_PROJECT_FAIL_STATUS(gProject->mode);
    }
    APP_ERROR_CHECK(err_code);
@@ -1413,11 +1519,11 @@ int main(void)
 #if defined(SERIAL_RECEIVER)
    if (app_timer_create(&serial_rx_timer, APP_TIMER_MODE_REPEATED, serial_receiver_timer_handler) != NRF_SUCCESS)
    {
-      printf("Can't create app timer \r\n");
+      NRF_LOG_PRINTF("Can't create app timer \r\n");
    }
    if (app_timer_start(serial_rx_timer, APP_TIMER_TICKS(1, APP_TIMER_PRESCALER), NULL) != NRF_SUCCESS)
    {
-      printf("Can't start app timer \r\n");
+      NRF_LOG_PRINTF("Can't start app timer \r\n");
    }
 
    // make default packet
