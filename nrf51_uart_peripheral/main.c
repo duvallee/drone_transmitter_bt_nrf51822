@@ -44,6 +44,8 @@
 #define WAVESHARE_BOARD
 
 // for debugging
+#define DEBUG_RTT_ERROR
+
 #define DEBUG_OUTPUT_BT_RECEIVED_DATA
 #define DEBUG_OUTPUT_BT_COMMAND_PARSER
 #define DEBUG_OUTPUT_BT_CHANNEL_PARSER
@@ -329,7 +331,10 @@ static int add_timer(TIMER_FN fn, uint32_t ms_elapse, int count, void* pdata)
 {
    int i;
    if (fn == NULL || ms_elapse == 0)
-   { 
+   {
+#if defined(DEBUG_RTT_ERROR)
+      NRF_LOG_PRINTF("[%s-%d] function is null(%p) or ms_slapse is 0 (%d) \r\n", __FUNCTION__, __LINE__, fn, ms_elapse);
+#endif
       return -1;
    }
    for (i = 0; i < MAX_TIMER_COUNT; i++)
@@ -343,6 +348,9 @@ static int add_timer(TIMER_FN fn, uint32_t ms_elapse, int count, void* pdata)
          gProject->timer[i].pData                        = pdata;
       }
    }
+#if defined(DEBUG_RTT_ERROR)
+   NRF_LOG_PRINTF("[%s-%d] timer is full (total timer = %d) \r\n", __FUNCTION__, __LINE__, MAX_TIMER_COUNT);
+#endif
    return -1;
 }
 
@@ -357,6 +365,9 @@ static int delete_timer(TIMER_FN fn)
    int i;
    if (fn == NULL)
    { 
+#if defined(DEBUG_RTT_ERROR)
+      NRF_LOG_PRINTF("[%s-%d] function is null \r\n", __FUNCTION__, __LINE__);
+#endif
       return -1;
    }
    for (i = 0; i < MAX_TIMER_COUNT; i++)
@@ -371,6 +382,9 @@ static int delete_timer(TIMER_FN fn)
          gProject->timer[i].pData                        = NULL;
       }
    }
+#if defined(DEBUG_RTT_ERROR)
+   NRF_LOG_PRINTF("[%s-%d] Not found timer (%p) \r\n", __FUNCTION__, __LINE__, fn);
+#endif
    return -1;
 }
 
@@ -492,8 +506,8 @@ static int bt_packet_to_fc_packet(uint16_t* p_bt_channel_info, uint8_t bt_channe
    RX_PACKET_SPEKTRUM_1024* pRxPacketSpektrum1024        = (RX_PACKET_SPEKTRUM_1024*) p_fc_packet;
    if (*p_fc_acket_size < sizeof(RX_PACKET_SPEKTRUM_1024))
    {
-#if defined(DEBUG_OUTPUT_BT_CHANNEL_PARSER)
-      NRF_LOG_PRINTF("wrong channel data : %d less than %d \r\n", *p_fc_acket_size, sizeof(RX_PACKET_SPEKTRUM_1024));
+#if defined(DEBUG_RTT_ERROR)
+      NRF_LOG_PRINTF("[%s-%d] wrong channel data : %d less than %d \r\n", __FUNCTION__, __LINE__, *p_fc_acket_size, sizeof(RX_PACKET_SPEKTRUM_1024));
 #endif
       return -1;
    }
@@ -551,6 +565,9 @@ static int default_fc_packet(void* p_fc_packet, uint8_t* p_fc_acket_size)
    RX_PACKET_SPEKTRUM_1024* pRxPacketSpektrum1024        = (RX_PACKET_SPEKTRUM_1024*) p_fc_packet;
    if (*p_fc_acket_size < sizeof(RX_PACKET_SPEKTRUM_1024))
    {
+#if defined(DEBUG_RTT_ERROR)
+      NRF_LOG_PRINTF("[%s-%d] packet size %d less than %d \r\n", __FUNCTION__, __LINE__, *p_fc_acket_size, sizeof(RX_PACKET_SPEKTRUM_1024));
+#endif
       return -1;
    }
 
@@ -634,6 +651,9 @@ static int msg_output_count                              = 0;
       {
          if (UART_RETRY_SEND_COUNT < retry_count++)
          {
+#if defined(DEBUG_RTT_ERROR)
+            NRF_LOG_PRINTF("[%s-%d] failed send to the UART [%d] [0x%02X] \r\n", __FUNCTION__, __LINE__, i, gProject->fc_tx_buffer[i]);
+#endif
             return;
          }
 #if defined(DEBUG_OUTPUT_FC_CHANNEL_DATA)
@@ -670,8 +690,8 @@ static void timer_bt_command_parser(void* pdata)
 
    if (gProject->parsing_status != 0)
    {
-#if defined(DEBUG_OUTPUT_BT_COMMAND_PARSER)
-      NRF_LOG_PRINTF("Does not process previous command !!! \r\n");
+#if defined(DEBUG_RTT_ERROR)
+      NRF_LOG_PRINTF("[%s-%d] Does not process previous command !!! \r\n", __FUNCTION__, __LINE__);
 #endif
       return;
    }
@@ -712,8 +732,8 @@ static void timer_bt_command_parser(void* pdata)
                // error code
                pbtProtocolResponse->option_1_high        = 0;
                pbtProtocolResponse->option_1_low         = ERROR_INTERNAL_PACKET_SIZE;
-#if defined(DEBUG_OUTPUT_BT_COMMAND_PARSER)
-               NRF_LOG_PRINTF("Wrong size or mismathed size from size of receive from bt(register cmd) \r\n");
+#if defined(DEBUG_RTT_ERROR)
+               NRF_LOG_PRINTF("[%s-%d] Wrong size or mismathed size from size of receive from bt(register cmd) \r\n", __FUNCTION__, __LINE__);
 #endif
                return;
             }
@@ -726,8 +746,8 @@ static void timer_bt_command_parser(void* pdata)
                // error code
                pbtProtocolResponse->option_1_high        = 0;
                pbtProtocolResponse->option_1_low         = ERROR_PACKET_SIZE;
-#if defined(DEBUG_OUTPUT_BT_COMMAND_PARSER)
-               NRF_LOG_PRINTF("Wrong packet size (register cmd) \r\n");
+#if defined(DEBUG_RTT_ERROR)
+               NRF_LOG_PRINTF("[%s-%d] Wrong packet size (register cmd) \r\n", __FUNCTION__, __LINE__);
 #endif
                return;
             }
@@ -744,8 +764,8 @@ static void timer_bt_command_parser(void* pdata)
                // error code
                pbtProtocolResponse->option_1_high        = 0;
                pbtProtocolResponse->option_1_low         = ERROR_INTERNAL_PACKET_SIZE;
-#if defined(DEBUG_OUTPUT_BT_COMMAND_PARSER)
-               NRF_LOG_PRINTF("Wrong size or mismathed size from size of receive from bt (alive msg) \r\n");
+#if defined(DEBUG_RTT_ERROR)
+               NRF_LOG_PRINTF("[%s-%d] Wrong size or mismathed size from size of receive from bt(register cmd) \r\n", __FUNCTION__, __LINE__);
 #endif
                return;
             }
@@ -758,8 +778,8 @@ static void timer_bt_command_parser(void* pdata)
                // error code
                pbtProtocolResponse->option_1_high        = 0;
                pbtProtocolResponse->option_1_low         = ERROR_PACKET_SIZE;
-#if defined(DEBUG_OUTPUT_BT_COMMAND_PARSER)
-               NRF_LOG_PRINTF("Wrong packet size (alive msg) \r\n");
+#if defined(DEBUG_RTT_ERROR)
+               NRF_LOG_PRINTF("[%s-%d] Wrong packet size (alive msg) \r\n", __FUNCTION__, __LINE__);
 #endif
                return;
             }
@@ -777,8 +797,8 @@ static void timer_bt_command_parser(void* pdata)
                // error code
                pbtProtocolResponse->option_1_high        = 0;
                pbtProtocolResponse->option_1_low         = ERROR_INTERNAL_PACKET_SIZE;
-#if defined(DEBUG_OUTPUT_BT_COMMAND_PARSER)
-               NRF_LOG_PRINTF("Wrong size or mismathed size from size of receive from bt (channel msg) \r\n");
+#if defined(DEBUG_RTT_ERROR)
+               NRF_LOG_PRINTF("[%s-%d] Wrong size or mismathed size from size of receive from bt(register cmd) \r\n", __FUNCTION__, __LINE__);
 #endif
                return;
             }
@@ -791,8 +811,8 @@ static void timer_bt_command_parser(void* pdata)
                // error code
                pbtProtocolResponse->option_1_high        = 0;
                pbtProtocolResponse->option_1_low         = ERROR_PACKET_SIZE;
-#if defined(DEBUG_OUTPUT_BT_COMMAND_PARSER)
-               NRF_LOG_PRINTF("Wrong packet size (channel msg) \r\n");
+#if defined(DEBUG_RTT_ERROR)
+               NRF_LOG_PRINTF("[%s-%d] Wrong packet size (alive msg) \r\n", __FUNCTION__, __LINE__);
 #endif
                return;
             }
@@ -805,8 +825,8 @@ static void timer_bt_command_parser(void* pdata)
             // error code
             pbtProtocolResponse->option_1_high           = 0;
             pbtProtocolResponse->option_1_low            = ERROR_UNKNOWN_COMMAND;
-#if defined(DEBUG_OUTPUT_BT_COMMAND_PARSER)
-            NRF_LOG_PRINTF("unknown command \r\n");
+#if defined(DEBUG_RTT_ERROR)
+            NRF_LOG_PRINTF("[%s-%d] unknown command \r\n", __FUNCTION__, __LINE__);
 #endif
             return;
       }
@@ -819,8 +839,8 @@ static void timer_bt_command_parser(void* pdata)
          // error code
          pbtProtocolResponse->option_1_high              = 0;
          pbtProtocolResponse->option_1_low               = ERROR_RESPONSE_VERSION;
-#if defined(DEBUG_OUTPUT_BT_COMMAND_PARSER)
-         NRF_LOG_PRINTF("mismatched version : %d, %d \r\n", pbtProtocolCommand->version_high, PROTOCOL_HEADER_HIGH_VERSION);
+#if defined(DEBUG_RTT_ERROR)
+         NRF_LOG_PRINTF("[%s-%d] mismatched version : %d, %d \r\n", __FUNCTION__, __LINE__, pbtProtocolCommand->version_high, PROTOCOL_HEADER_HIGH_VERSION);
 #endif
          return;
       }
@@ -832,8 +852,8 @@ static void timer_bt_command_parser(void* pdata)
          // error code
          pbtProtocolResponse->option_1_high              = 0;
          pbtProtocolResponse->option_1_low               = ERROR_RESPONSE_VERSION;
-#if defined(DEBUG_OUTPUT_BT_COMMAND_PARSER)
-         NRF_LOG_PRINTF("mismatched version : %d, %d \r\n", pbtProtocolCommand->version_low, PROTOCOL_HEADER_LOW_VERSION);
+#if defined(DEBUG_RTT_ERROR)
+         NRF_LOG_PRINTF("[%s-%d] mismatched version : %d, %d \r\n", __FUNCTION__, __LINE__, pbtProtocolCommand->version_low, PROTOCOL_HEADER_LOW_VERSION);
 #endif
          return;
       }
@@ -1025,6 +1045,9 @@ static void nus_data_handler(ble_nus_t * p_nus, uint8_t * p_data, uint16_t lengt
    if (gProject->received_rx_length > 0)
    {
       gProject->received_drop_frame_cout++;
+#if defined(DEBUG_RTT_ERROR)
+      NRF_LOG_PRINTF("[%s-%d] Drop received frame from bt, because not process previos packet (%d) \r\n", __FUNCTION__, __LINE__, gProject->received_rx_length);
+#endif
       return;
    }
 
@@ -1511,7 +1534,9 @@ int main(void)
    err_code                                              = ble_advertising_start(BLE_ADV_MODE_FAST);
    if (err_code != NRF_SUCCESS)
    {
-      NRF_LOG_PRINTF("ble_advertising_start() failed : %d \r\n", (int) err_code);
+#if defined(DEBUG_RTT_ERROR)
+      NRF_LOG_PRINTF("[%s-%d] ble_advertising_start() failed : %d \r\n", __FUNCTION__, __LINE__, (int) err_code);
+#endif
       SET_PROJECT_FAIL_STATUS(gProject->mode);
    }
    APP_ERROR_CHECK(err_code);
@@ -1519,11 +1544,15 @@ int main(void)
 #if defined(SERIAL_RECEIVER)
    if (app_timer_create(&serial_rx_timer, APP_TIMER_MODE_REPEATED, serial_receiver_timer_handler) != NRF_SUCCESS)
    {
-      NRF_LOG_PRINTF("Can't create app timer \r\n");
+#if defined(DEBUG_RTT_ERROR)
+      NRF_LOG_PRINTF("[%s-%d] Can't create app timer \r\n", __FUNCTION__, __LINE__);
+#endif
    }
    if (app_timer_start(serial_rx_timer, APP_TIMER_TICKS(1, APP_TIMER_PRESCALER), NULL) != NRF_SUCCESS)
    {
-      NRF_LOG_PRINTF("Can't start app timer \r\n");
+#if defined(DEBUG_RTT_ERROR)
+      NRF_LOG_PRINTF("[%s-%d] Can't create app timer \r\n", __FUNCTION__, __LINE__);
+#endif
    }
 
    // make default packet
