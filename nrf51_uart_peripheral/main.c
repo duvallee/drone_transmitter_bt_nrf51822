@@ -46,11 +46,12 @@
 // for debugging
 #define DEBUG_RTT_ERROR
 
-#define DEBUG_OUTPUT_BT_RECEIVED_DATA
+#define DEBUG_OUTPUT_TIMER
+//#define DEBUG_OUTPUT_BT_RECEIVED_DATA
 #define DEBUG_OUTPUT_BT_COMMAND_PARSER
 #define DEBUG_OUTPUT_BT_CHANNEL_PARSER
-#define DEBUG_OUTPUT_FC_CHANNEL_DATA
-#define DEBUG_OUTPUT_BT_RESPONSE
+// #define DEBUG_OUTPUT_FC_CHANNEL_DATA
+// #define DEBUG_OUTPUT_BT_RESPONSE
 
 // -----------------------------------------------------------------------------
 // for debugging...
@@ -71,6 +72,11 @@
 #define PROTOCOL_BASIC_MAX_SIZE                          8
 #define PROTOCOL_CHANNEL_MAX_SIZE                        32
 
+// 20 bytes is max size of bluetooth in the android.
+// And then, send channels data by twice.
+#define PROTOCOL_PACKET_BASIC_SIZE                       8
+#define PROTOCOL_PACKET_EXTRA_SIZE                       16
+
 #define PROTOCOL_HEADER_HIGH_VERSION                     0x10
 #define PROTOCOL_HEADER_LOW_VERSION                      0x01
 
@@ -85,10 +91,10 @@
 
 // channel id
 // if it need modified id of channel, must be changed in the android.
-#define SPEKTRUM_CHANNEL_ROLL                            0
-#define SPEKTRUM_CHANNEL_PITCH                           1
-#define SPEKTRUM_CHANNEL_YAW                             2
-#define SPEKTRUM_CHANNEL_THROTTLE                        3
+#define SPEKTRUM_CHANNEL_ROLL                            1
+#define SPEKTRUM_CHANNEL_PITCH                           2
+#define SPEKTRUM_CHANNEL_YAW                             3
+#define SPEKTRUM_CHANNEL_THROTTLE                        0
 #define SPEKTRUM_CHANNEL_GEAR                            4
 #define SPEKTRUM_CHANNEL_AUX_1                           5
 #define SPEKTRUM_CHANNEL_AUX_2                           6
@@ -247,6 +253,7 @@ typedef struct _PROJECT
    // for receive data from bt
    uint8_t bt_rx_buffer[PROTOCOL_CHANNEL_MAX_SIZE];
    uint8_t received_rx_length;
+   uint8_t received_rx_packet_complete;
    uint32_t received_drop_frame_cout;
 
    // for response to bt
@@ -337,8 +344,15 @@ static int add_timer(TIMER_FN fn, uint32_t ms_elapse, int count, void* pdata)
 #endif
       return -1;
    }
+
+#if defined(DEBUG_OUTPUT_TIMER)
+      NRF_LOG_PRINTF("[%s-%d] fn=%p, ms_elapse = %d, count = %d, data = %p \r\n", __FUNCTION__, __LINE__, fn, ms_elapse, count, pdata);
+#endif
    for (i = 0; i < MAX_TIMER_COUNT; i++)
    {
+#if defined(DEBUG_OUTPUT_TIMER)
+      NRF_LOG_PRINTF("[%s-%d] [%d] : %p \r\n", __FUNCTION__, __LINE__, i, gProject->timer[i].fn_timer);
+#endif
       if (gProject->timer[i].fn_timer == NULL)
       {
          gProject->timer[i].tick_count                   = 0;
@@ -346,6 +360,7 @@ static int add_timer(TIMER_FN fn, uint32_t ms_elapse, int count, void* pdata)
          gProject->timer[i].call_count                   = count;
          gProject->timer[i].fn_timer                     = fn;
          gProject->timer[i].pData                        = pdata;
+         return 0;
       }
    }
 #if defined(DEBUG_RTT_ERROR)
@@ -501,9 +516,14 @@ typedef struct _RX_PACKET_SPEKTRUM_1024
  ******************************************************************/
 static int bt_packet_to_fc_packet(uint16_t* p_bt_channel_info, uint8_t bt_channel_count, void* p_fc_packet, uint8_t* p_fc_acket_size)
 {
-   int bt_channel_index;
-   int spektrum_channel_index;
+   uint16_t bt_channel_index;
+   uint16_t spektrum_channel_index;
+
+   uint16_t channel_id;
+   uint16_t channel_value;
+
    RX_PACKET_SPEKTRUM_1024* pRxPacketSpektrum1024        = (RX_PACKET_SPEKTRUM_1024*) p_fc_packet;
+
    if (*p_fc_acket_size < sizeof(RX_PACKET_SPEKTRUM_1024))
    {
 #if defined(DEBUG_RTT_ERROR)
@@ -519,19 +539,51 @@ static int bt_packet_to_fc_packet(uint16_t* p_bt_channel_info, uint8_t bt_channe
    pRxPacketSpektrum1024->fades                          = 0x0;
    pRxPacketSpektrum1024->system                         = SPEKTRUM_DSM2_22MS;
 
+#if defined(DEBUG_OUTPUT_BT_CHANNEL_PARSER)
+   NRF_LOG_PRINTF("------------------------------------------------------------- \r\n");
+#endif
+
    for (bt_channel_index = 0, spektrum_channel_index = 0;
         bt_channel_index < bt_channel_count && spektrum_channel_index < MAX_SPEKTRUM_CHANNEL_NUM;
         bt_channel_index++, spektrum_channel_index++)
    {
+      channel_id                                         = ((p_bt_channel_info[bt_channel_index] >> 4) & 0x0F);
+      channel_value                                      = ((p_bt_channel_info[bt_channel_index] >> 8) & 0x00FF) |
+                                                           ((p_bt_channel_info[bt_channel_index] << 8) & 0x0F00) ;
+
+      pRxPacketSpektrum1024->channel[spektrum_channel_index] = (SPEKTRUM_1024_CHANID_MASK & (channel_id << SPEKTRUM_1024_CHANNEL_SHIFT_BITS)) |
+                                                               (SPEKTRUM_1024_SXPOS_MASK & channel_value);
+
+      pRxPacketSpektrum1024->channel[spektrum_channel_index] = (channel_id << 2) | ((channel_value << 8) & 0x0F) | ((channel_value >> 8) & 0x3);
+
+      NRF_LOG_PRINTF("[%d] : id = %2d, v = %4d    [0x%04X] \r\n", bt_channel_index, channel_id, channel_value, pRxPacketSpektrum1024->channel[spektrum_channel_index] );
+#if 0
+#if defined(DEBUG_OUTPUT_BT_CHANNEL_PARSER)
+      NRF_LOG_PRINTF("[%d] \r\n", bt_channel_index);
+
+      NRF_LOG_PRINTF("Channel Data of original \r\n");
+      NRF_LOG_HEX(p_bt_channel_info[bt_channel_index]);
+
+      NRF_LOG_PRINTF("\r\nChannel id    : %d \r\n", channel_id);
+      NRF_LOG_PRINTF("Channel value : %d \r\n", channel_value);
+      NRF_LOG_PRINTF("hexa : 0x%04X \r\n", pRxPacketSpektrum1024->channel[spektrum_channel_index]);
+      NRF_LOG_PRINTF("[%2d] : CH(%2d), VALUE(%4d) : [0x%04X] org - [0x%04X] \r\n", bt_channel_index
+                                                            channel_id,
+                                                            channel_value,
+                                                            spektrum_channel_index,
+                                                            p_bt_channel_info[bt_channel_index],
+                                                            pRxPacketSpektrum1024->channel[spektrum_channel_index]);
+#endif
+#endif
+
+#if 0
       pRxPacketSpektrum1024->channel[spektrum_channel_index] = (SPEKTRUM_1024_CHANID_MASK & (p_bt_channel_info[bt_channel_index] >> 2)) |
                                                                (SPEKTRUM_1024_SXPOS_MASK & p_bt_channel_info[bt_channel_index]);
-
-#if defined(DEBUG_OUTPUT_BT_CHANNEL_PARSER)
-      NRF_LOG_PRINTF("[%d] : c(%d), v(%d) \r\n", spektrum_channel_index,
-               (SPEKTRUM_1024_CHANID_MASK & (p_bt_channel_info[bt_channel_index] >> 2)),
-               (SPEKTRUM_1024_SXPOS_MASK & p_bt_channel_info[bt_channel_index]));
 #endif
    }
+#if defined(DEBUG_OUTPUT_BT_CHANNEL_PARSER)
+   NRF_LOG_PRINTF("------------------------------------------------------------- \r\n");
+#endif
    return 0;
 }
 
@@ -539,18 +591,18 @@ static int bt_packet_to_fc_packet(uint16_t* p_bt_channel_info, uint8_t bt_channe
 // default value for failsafe mode ...
 static FAILSAFE_MODE_VALUE g_failsafe_value[SPEKTRUM_MAX_CHANNEL] =
 {
-   { (SPEKTRUM_CHANNEL_ROLL << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),      512},
-   { (SPEKTRUM_CHANNEL_PITCH << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),     512},
-   { (SPEKTRUM_CHANNEL_YAW << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),       512},
-   { (SPEKTRUM_CHANNEL_THROTTLE << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),  100},
-   { (SPEKTRUM_CHANNEL_GEAR << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),      100},
-   { (SPEKTRUM_CHANNEL_AUX_1 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),     512},
-   { (SPEKTRUM_CHANNEL_AUX_2 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),     512},
-   { (SPEKTRUM_CHANNEL_AUX_3 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),     512},
-   { (SPEKTRUM_CHANNEL_AUX_4 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),     512},
-   { (SPEKTRUM_CHANNEL_AUX_5 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),     512},
-   { (SPEKTRUM_CHANNEL_AUX_6 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),     512},
-   { (SPEKTRUM_CHANNEL_AUX_7 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),     512},
+   { (SPEKTRUM_CHANNEL_ROLL << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),      650},
+   { (SPEKTRUM_CHANNEL_PITCH << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),     650},
+   { (SPEKTRUM_CHANNEL_YAW << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),       650},
+   { (SPEKTRUM_CHANNEL_THROTTLE << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),  300},
+   { (SPEKTRUM_CHANNEL_GEAR << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),      300},
+   { (SPEKTRUM_CHANNEL_AUX_1 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),     650},
+   { (SPEKTRUM_CHANNEL_AUX_2 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),     650},
+   { (SPEKTRUM_CHANNEL_AUX_3 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),     650},
+   { (SPEKTRUM_CHANNEL_AUX_4 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),     650},
+   { (SPEKTRUM_CHANNEL_AUX_5 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),     650},
+   { (SPEKTRUM_CHANNEL_AUX_6 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),     650},
+   { (SPEKTRUM_CHANNEL_AUX_7 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),     650},
 };
 
 /******************************************************************
@@ -632,7 +684,7 @@ static void timer_send_msg_to_fc_controller(void* pdata)
 // To output string per about 2 seconds
 static int msg_output_count                              = 0;
 
-   if (((++msg_output_count) % 90) == 0)
+   if (((++msg_output_count++) % 90) == 0)
    {
       NRF_LOG_PRINTF("send packet to the FC \r\n");
    }
@@ -659,9 +711,7 @@ static int msg_output_count                              = 0;
 #if defined(DEBUG_OUTPUT_FC_CHANNEL_DATA)
          if (((msg_output_count) % 90) == 0)
          {
-            NRF_LOG_PRINTF("[");
-            NRF_LOG_HEX(gProject->fc_tx_buffer[i]);
-            NRF_LOG_PRINTF("] ");
+            NRF_LOG_PRINTF("[0x%02X] ", gProject->fc_tx_buffer[i]);
          }
 #endif
       }
@@ -691,19 +741,29 @@ static void timer_bt_command_parser(void* pdata)
    if (gProject->parsing_status != 0)
    {
 #if defined(DEBUG_RTT_ERROR)
-      NRF_LOG_PRINTF("[%s-%d] Does not process previous command !!! \r\n", __FUNCTION__, __LINE__);
+static int parsing_status_index                          = 0;
+      if ((parsing_status_index++ % 100) == 0)
+      {
+         NRF_LOG_PRINTF("[%s-%d] Does not process previous command !!! \r\n", __FUNCTION__, __LINE__);
+      }
 #endif
       return;
    }
 
-   if (gProject->received_rx_length > 0)
+#if defined(DEBUG_OUTPUT_BT_COMMAND_PARSER)
+//   NRF_LOG_PRINTF("[%s-%d] cammand parser : %d \r\n", __FUNCTION__, __LINE__, gProject->received_rx_length);
+#endif
+
+   if (gProject->received_rx_packet_complete != 0)
    {
       pbtProtocolCommand                                 = (BT_PROTOCOL_COMMAND*) gProject->bt_rx_buffer;
       pbtProtocolResponse                                = (BT_PROTOCOL_COMMAND*) gProject->bt_tx_buffer;
 
       gProject->parsing_result_code                      = SUCCESS_RESPONSE;
       gProject->parsing_status                           = 1;
+      gProject->received_rx_packet_complete              = 0;
       gProject->received_rx_length                       = 0;
+
 
       pbtProtocolResponse->version_high                  = PROTOCOL_HEADER_HIGH_VERSION;
       pbtProtocolResponse->version_low                   = PROTOCOL_REGISTER_RESPONSE;
@@ -798,7 +858,7 @@ static void timer_bt_command_parser(void* pdata)
                pbtProtocolResponse->option_1_high        = 0;
                pbtProtocolResponse->option_1_low         = ERROR_INTERNAL_PACKET_SIZE;
 #if defined(DEBUG_RTT_ERROR)
-               NRF_LOG_PRINTF("[%s-%d] Wrong size or mismathed size from size of receive from bt(register cmd) \r\n", __FUNCTION__, __LINE__);
+               NRF_LOG_PRINTF("[%s-%d] Wrong size or mismathed size from size of receive from bt(register cmd) - %d \r\n", __FUNCTION__, __LINE__, rx_data_length);
 #endif
                return;
             }
@@ -869,7 +929,7 @@ static void timer_bt_command_parser(void* pdata)
                pbtProtocolResponse->option_1_high        = 0;
                pbtProtocolResponse->option_1_low         = ERROR_ALREADY_REGISTERED;
 #if defined(DEBUG_OUTPUT_BT_COMMAND_PARSER)
-               NRF_LOG_PRINTF("already register \r\n");
+//               NRF_LOG_PRINTF("already register \r\n");
 #endif
                return;
             }
@@ -892,6 +952,7 @@ static void timer_bt_command_parser(void* pdata)
 
          case PROTOCOL_CHANNEL_MESSAGE :
             pbtProtocolChannelData                       = (BT_PROTOCOL_DATA*) gProject->bt_rx_buffer;
+
             gProject->internal_tx_packet_size            = SERIAL_RX_TRANSMITTER_MAX_SIZE;
             if (bt_packet_to_fc_packet(&(pbtProtocolChannelData->channel_1), SPEKTRUM_MAX_CHANNEL,
                                        (void*) gProject->internal_tx_buffer, &gProject->internal_tx_packet_size) < 0)
@@ -923,23 +984,25 @@ static void timer_bt_response(void* pdata)
 {
    uint32_t err_code;
 
-   if (gProject->parsing_status != 0)
+   if (gProject->parsing_status == 0)
    {
       return;
    }
 
 #if defined(DEBUG_OUTPUT_BT_RESPONSE)
    {
-      int i;
-
-      NRF_LOG_PRINTF("BT RESPONSE \r\n");
-      for (i = 0; i < PROTOCOL_BASIC_MAX_SIZE; i++)
+static int timer_bt_response_count                       = 0;
+      if ((timer_bt_response_count++ % 10) == 0)
       {
-         NRF_LOG_PRINTF("[");
-         NRF_LOG_HEX(gProject->bt_tx_buffer[i]);
-         NRF_LOG_PRINTF("] ");
+         int i;
+
+         NRF_LOG_PRINTF("BT RESPONSE \r\n");
+         for (i = 0; i < PROTOCOL_BASIC_MAX_SIZE; i++)
+         {
+            NRF_LOG_PRINTF("[0x%02X] ", gProject->bt_tx_buffer[i]);
+         }
+         NRF_LOG_PRINTF("\r\n");
       }
-      NRF_LOG_PRINTF("\r\n");
    }
 #endif
 
@@ -1037,39 +1100,110 @@ static void gap_params_init(void)
  * @param[in] length   Length of the data.
  */
 /**@snippet [Handling the data received over BLE] */
-int copy_byte                                            = 0;
+#if defined(DEBUG_OUTPUT_BT_RECEIVED_DATA)
+static int test_nus_data_handler_count                   = 0;
+#endif
 static void nus_data_handler(ble_nus_t * p_nus, uint8_t * p_data, uint16_t length)
 {
    int i;
 
+#if defined(DEBUG_OUTPUT_BT_RECEIVED_DATA)
+   if ((test_nus_data_handler_count++ % 10) == 0)
+   {
+      NRF_LOG_PRINTF("BT Received Data : %d bytes(internal length : %d) \r\n", length, gProject->received_rx_length);
+   }
+#endif
+
+   if (gProject->received_rx_packet_complete != 0)
+   {
+      return;
+   }
+
+#if 0
    if (gProject->received_rx_length > 0)
    {
       gProject->received_drop_frame_cout++;
 #if defined(DEBUG_RTT_ERROR)
-      NRF_LOG_PRINTF("[%s-%d] Drop received frame from bt, because not process previos packet (%d) \r\n", __FUNCTION__, __LINE__, gProject->received_rx_length);
+      if ((gProject->received_drop_frame_cout % 10) == 0)
+      {
+         NRF_LOG_PRINTF("[%s-%d] Drop received frame from bt, because not process previos packet (%d) \r\n", __FUNCTION__, __LINE__, gProject->received_rx_length);
+      }
 #endif
       return;
    }
-
-   gProject->received_rx_length                       = (length > PROTOCOL_CHANNEL_MAX_SIZE) ? (PROTOCOL_CHANNEL_MAX_SIZE) : (length);
-
-#if defined(DEBUG_OUTPUT_BT_RECEIVED_DATA)
-   NRF_LOG_PRINTF("BT Received Data : %d bytes \r\n", gProject->received_rx_length);
 #endif
+
+   if (length == PROTOCOL_PACKET_BASIC_SIZE)
+   {
+      // register or alive packet
+      for (i = 0; i < PROTOCOL_PACKET_BASIC_SIZE; i++)
+      {
+         gProject->bt_rx_buffer[i]                       = *(p_data + i);
+      }
+      gProject->received_rx_length                       = length;
+      gProject->received_rx_packet_complete              = 1;
+   }
+   else if (length == PROTOCOL_PACKET_EXTRA_SIZE)
+   {
+      if (gProject->received_rx_length > 0)
+      {
+         // second packet of channel
+         NRF_LOG_PRINTF("second 16 bytes \r\n");
+         for (i = 0; i < PROTOCOL_PACKET_EXTRA_SIZE; i++)
+         {
+            gProject->bt_rx_buffer[PROTOCOL_PACKET_EXTRA_SIZE + i] = *(p_data + i);
+            NRF_LOG_HEX(gProject->bt_rx_buffer[PROTOCOL_PACKET_EXTRA_SIZE + i]);
+            NRF_LOG_PRINTF("  ");
+         }
+         NRF_LOG_PRINTF("\r\n");
+         gProject->received_rx_length                    += length;
+         gProject->received_rx_packet_complete              = 1;
+#if defined(DEBUG_OUTPUT_BT_RECEIVED_DATA)
+         NRF_LOG_PRINTF("complete packet of channel ");
+#endif
+      }
+      else
+      {
+         // first packet of channel
+         NRF_LOG_PRINTF("first 16 bytes \r\n");
+         for (i = 0; i < PROTOCOL_PACKET_EXTRA_SIZE; i++)
+         {
+            gProject->bt_rx_buffer[i]                    = *(p_data + i);
+            NRF_LOG_HEX(gProject->bt_rx_buffer[i]);
+            NRF_LOG_PRINTF("  ");
+         }
+         NRF_LOG_PRINTF("\r\n");
+         gProject->received_rx_length                    = length;
+#if defined(DEBUG_OUTPUT_BT_RECEIVED_DATA)
+         NRF_LOG_PRINTF("first packet of channel ");
+#endif
+      }
+   }
+   else
+   {
+#if defined(DEBUG_RTT_ERROR)
+      NRF_LOG_PRINTF("[%s-%d] wrong packet size (%d) \r\n", __FUNCTION__, __LINE__, length);
+#endif
+   }
+
+#if 0
+   gProject->received_rx_length                       = (length > PROTOCOL_CHANNEL_MAX_SIZE) ? (PROTOCOL_CHANNEL_MAX_SIZE) : (length);
 
    for (i = 0; i < gProject->received_rx_length; i++)
    {
       gProject->bt_rx_buffer[i]                       = *(p_data + i);
 
 #if defined(DEBUG_OUTPUT_BT_RECEIVED_DATA)
-      NRF_LOG_PRINTF("[");
-      NRF_LOG_HEX(gProject->bt_rx_buffer[i]);
-      NRF_LOG_PRINTF("] ");
-#endif      
-#if defined(DEBUG_OUTPUT_BT_RECEIVED_DATA)
-      NRF_LOG_PRINTF("\r\n");
+      if ((test_nus_data_handler_count++ % 10) == 0)
+      {
+         NRF_LOG_PRINTF("[0x%02X] ", gProject->bt_rx_buffer[i]);
+      }
 #endif
    }
+#if defined(DEBUG_OUTPUT_BT_RECEIVED_DATA)
+   NRF_LOG_PRINTF("\r\n");
+#endif
+#endif
 }
 /**@snippet [Handling the data received over BLE] */
 
