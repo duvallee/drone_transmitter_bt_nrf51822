@@ -554,7 +554,7 @@ static int bt_packet_to_fc_packet(uint16_t* p_bt_channel_info, uint8_t bt_channe
       pRxPacketSpektrum1024->channel[spektrum_channel_index] = (SPEKTRUM_1024_CHANID_MASK & (channel_id << SPEKTRUM_1024_CHANNEL_SHIFT_BITS)) |
                                                                (SPEKTRUM_1024_SXPOS_MASK & channel_value);
 
-      pRxPacketSpektrum1024->channel[spektrum_channel_index] = (channel_id << 2) | ((channel_value << 8) & 0x0F) | ((channel_value >> 8) & 0x3);
+      pRxPacketSpektrum1024->channel[spektrum_channel_index] = (channel_id << 2) | ((channel_value << 8) & 0xFF00) | ((channel_value >> 8) & 0x3);
 
       NRF_LOG_PRINTF("[%d] : id = %2d, v = %4d    [0x%04X] \r\n", bt_channel_index, channel_id, channel_value, pRxPacketSpektrum1024->channel[spektrum_channel_index] );
 #if 0
