@@ -91,10 +91,12 @@
 
 // channel id
 // if it need modified id of channel, must be changed in the android.
-#define SPEKTRUM_CHANNEL_ROLL                            1
-#define SPEKTRUM_CHANNEL_PITCH                           2
+// channel map : spektrum / Graupner / JR   : TAER1234, (Throttle, ROLL, PITCH, YAW)
+//             : Default                    : AETR1234, (ROLL, PITCH, THROTTLE, YAW)
+#define SPEKTRUM_CHANNEL_ROLL                            0
+#define SPEKTRUM_CHANNEL_PITCH                           1
 #define SPEKTRUM_CHANNEL_YAW                             3
-#define SPEKTRUM_CHANNEL_THROTTLE                        0
+#define SPEKTRUM_CHANNEL_THROTTLE                        2
 #define SPEKTRUM_CHANNEL_GEAR                            4
 #define SPEKTRUM_CHANNEL_AUX_1                           5
 #define SPEKTRUM_CHANNEL_AUX_2                           6
@@ -551,9 +553,10 @@ static int bt_packet_to_fc_packet(uint16_t* p_bt_channel_info, uint8_t bt_channe
       channel_value                                      = ((p_bt_channel_info[bt_channel_index] >> 8) & 0x00FF) |
                                                            ((p_bt_channel_info[bt_channel_index] << 8) & 0x0F00) ;
 
+#if 0
       pRxPacketSpektrum1024->channel[spektrum_channel_index] = (SPEKTRUM_1024_CHANID_MASK & (channel_id << SPEKTRUM_1024_CHANNEL_SHIFT_BITS)) |
                                                                (SPEKTRUM_1024_SXPOS_MASK & channel_value);
-
+#endif
       pRxPacketSpektrum1024->channel[spektrum_channel_index] = (channel_id << 2) | ((channel_value << 8) & 0xFF00) | ((channel_value >> 8) & 0x3);
 
       NRF_LOG_PRINTF("[%d] : id = %2d, v = %4d    [0x%04X] \r\n", bt_channel_index, channel_id, channel_value, pRxPacketSpektrum1024->channel[spektrum_channel_index] );
@@ -591,18 +594,18 @@ static int bt_packet_to_fc_packet(uint16_t* p_bt_channel_info, uint8_t bt_channe
 // default value for failsafe mode ...
 static FAILSAFE_MODE_VALUE g_failsafe_value[SPEKTRUM_MAX_CHANNEL] =
 {
-   { (SPEKTRUM_CHANNEL_ROLL << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),      650},
-   { (SPEKTRUM_CHANNEL_PITCH << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),     650},
-   { (SPEKTRUM_CHANNEL_YAW << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),       650},
-   { (SPEKTRUM_CHANNEL_THROTTLE << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),  300},
-   { (SPEKTRUM_CHANNEL_GEAR << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),      300},
-   { (SPEKTRUM_CHANNEL_AUX_1 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),     650},
-   { (SPEKTRUM_CHANNEL_AUX_2 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),     650},
-   { (SPEKTRUM_CHANNEL_AUX_3 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),     650},
-   { (SPEKTRUM_CHANNEL_AUX_4 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),     650},
-   { (SPEKTRUM_CHANNEL_AUX_5 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),     650},
-   { (SPEKTRUM_CHANNEL_AUX_6 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),     650},
-   { (SPEKTRUM_CHANNEL_AUX_7 << SPEKTRUM_1024_CHANNEL_SHIFT_BITS),     650},
+   { (SPEKTRUM_CHANNEL_ROLL),      512},
+   { (SPEKTRUM_CHANNEL_PITCH),     512},
+   { (SPEKTRUM_CHANNEL_YAW),       512},
+   { (SPEKTRUM_CHANNEL_THROTTLE),  100},
+   { (SPEKTRUM_CHANNEL_GEAR),      100},
+   { (SPEKTRUM_CHANNEL_AUX_1),     512},
+   { (SPEKTRUM_CHANNEL_AUX_2),     512},
+   { (SPEKTRUM_CHANNEL_AUX_3),     512},
+   { (SPEKTRUM_CHANNEL_AUX_4),     512},
+   { (SPEKTRUM_CHANNEL_AUX_5),     512},
+   { (SPEKTRUM_CHANNEL_AUX_6),     512},
+   { (SPEKTRUM_CHANNEL_AUX_7),     512},
 };
 
 /******************************************************************
@@ -632,7 +635,12 @@ static int default_fc_packet(void* p_fc_packet, uint8_t* p_fc_acket_size)
 
    for (i = 0; i < MAX_SPEKTRUM_CHANNEL_NUM; i++)
    {
+#if 0
       pRxPacketSpektrum1024->channel[i]                  = (g_failsafe_value[i].channel_id | g_failsafe_value[i].value);
+#endif
+      pRxPacketSpektrum1024->channel[i]                  = (g_failsafe_value[i].channel_id << 2) |
+                                                           ((g_failsafe_value[i].value << 8) & 0xFF00) |
+                                                           ((g_failsafe_value[i].value >> 8) & 0x3);
    }
    return 0;
 }
