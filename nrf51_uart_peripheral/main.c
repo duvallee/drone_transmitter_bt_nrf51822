@@ -47,11 +47,11 @@
 #define DEBUG_RTT_ERROR
 
 #define DEBUG_OUTPUT_TIMER
-//#define DEBUG_OUTPUT_BT_RECEIVED_DATA
+// #define DEBUG_OUTPUT_BT_RECEIVED_DATA
 #define DEBUG_OUTPUT_BT_COMMAND_PARSER
 #define DEBUG_OUTPUT_BT_CHANNEL_PARSER
 // #define DEBUG_OUTPUT_FC_CHANNEL_DATA
-// #define DEBUG_OUTPUT_BT_RESPONSE
+#define DEBUG_OUTPUT_BT_RESPONSE
 
 // -----------------------------------------------------------------------------
 // for debugging...
@@ -692,7 +692,7 @@ static void timer_send_msg_to_fc_controller(void* pdata)
 // To output string per about 2 seconds
 static int msg_output_count                              = 0;
 
-   if (((++msg_output_count++) % 90) == 0)
+   if (((msg_output_count++) % 90) == 0)
    {
       NRF_LOG_PRINTF("send packet to the FC \r\n");
    }
@@ -1116,6 +1116,8 @@ static void nus_data_handler(ble_nus_t * p_nus, uint8_t * p_data, uint16_t lengt
    int i;
 
 #if defined(DEBUG_OUTPUT_BT_RECEIVED_DATA)
+   NRF_LOG_PRINTF("BT Received Data : %d bytes(internal length : %d) \r\n", length, gProject->received_rx_length);
+
    if ((test_nus_data_handler_count++ % 10) == 0)
    {
       NRF_LOG_PRINTF("BT Received Data : %d bytes(internal length : %d) \r\n", length, gProject->received_rx_length);
@@ -1126,20 +1128,6 @@ static void nus_data_handler(ble_nus_t * p_nus, uint8_t * p_data, uint16_t lengt
    {
       return;
    }
-
-#if 0
-   if (gProject->received_rx_length > 0)
-   {
-      gProject->received_drop_frame_cout++;
-#if defined(DEBUG_RTT_ERROR)
-      if ((gProject->received_drop_frame_cout % 10) == 0)
-      {
-         NRF_LOG_PRINTF("[%s-%d] Drop received frame from bt, because not process previos packet (%d) \r\n", __FUNCTION__, __LINE__, gProject->received_rx_length);
-      }
-#endif
-      return;
-   }
-#endif
 
    if (length == PROTOCOL_PACKET_BASIC_SIZE)
    {
@@ -1153,6 +1141,7 @@ static void nus_data_handler(ble_nus_t * p_nus, uint8_t * p_data, uint16_t lengt
    }
    else if (length == PROTOCOL_PACKET_EXTRA_SIZE)
    {
+      NRF_LOG_PRINTF("Channel Data : %d bytes(internal length : %d) \r\n", length, gProject->received_rx_length);
       if (gProject->received_rx_length > 0)
       {
          // second packet of channel
@@ -1165,7 +1154,7 @@ static void nus_data_handler(ble_nus_t * p_nus, uint8_t * p_data, uint16_t lengt
          }
          NRF_LOG_PRINTF("\r\n");
          gProject->received_rx_length                    += length;
-         gProject->received_rx_packet_complete              = 1;
+         gProject->received_rx_packet_complete           = 1;
 #if defined(DEBUG_OUTPUT_BT_RECEIVED_DATA)
          NRF_LOG_PRINTF("complete packet of channel ");
 #endif
@@ -1616,6 +1605,14 @@ static void buttons_leds_init(bool * p_erase_bonds)
 static void power_manage(void)
 {
     uint32_t err_code = sd_app_evt_wait();
+
+#if defined(DEBUG_RTT_ERROR)
+   if (err_code != NRF_SUCCESS)
+   {
+      NRF_LOG_PRINTF("[%s-%d] error handler : %d \r\n", __FUNCTION__, __LINE__, err_code);
+   }
+#endif
+
     APP_ERROR_CHECK(err_code);
 }
 
@@ -1707,6 +1704,8 @@ int main(void)
    add_timer(timer_failsafe_mode, SERIAL_RX_COMMAND_FAILSAFE_TIMER, -1, NULL);
 #endif
    SET_PROJECT_READY_STATUS(gProject->mode);
+
+   NRF_LOG_PRINTF("[%s-%d] Start Program ... \r\n", __FUNCTION__, __LINE__);
 
    // Enter main loop.
    for (;;)
