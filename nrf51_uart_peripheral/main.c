@@ -48,10 +48,11 @@
 
 #define DEBUG_OUTPUT_TIMER
 // #define DEBUG_OUTPUT_BT_RECEIVED_DATA
-#define DEBUG_OUTPUT_BT_COMMAND_PARSER
-#define DEBUG_OUTPUT_BT_CHANNEL_PARSER
+// #define DEBUG_OUTPUT_BT_COMMAND_PARSER
+// #define DEBUG_OUTPUT_BT_CHANNEL_PARSER
 // #define DEBUG_OUTPUT_FC_CHANNEL_DATA
-#define DEBUG_OUTPUT_BT_RESPONSE
+// #define DEBUG_OUTPUT_BT_RESPONSE
+#define DEBUG_OUTPUT_FAILSAFE_MODE
 
 // -----------------------------------------------------------------------------
 // for debugging...
@@ -225,6 +226,16 @@ typedef struct _TIMER
    void* pData;
 } TIMER;
 
+// -----------------------------------------------------------------------------
+// for failsafe mode
+#define FAILSAFE_MODE_TIME_OUT_SECOND                    10
+#define FAILSAFE_MODE_TIME_RUN_SECOND                    5
+typedef struct
+{
+   uint8_t channel_id;
+   uint16_t value;
+} BT_TRANSMITTER_CHANNEL_INFO;
+
 
 // -----------------------------------------------------------------------------
 // for project
@@ -244,9 +255,14 @@ typedef struct _PROJECT
    // tick counter when enter failsafe mode
    uint32_t enter_failsafe_mode_tick_count;
 
-   // use internal : packet for fc
-   uint8_t internal_tx_buffer[SERIAL_RX_TRANSMITTER_MAX_SIZE];
-   uint8_t internal_tx_packet_size;
+   // use in failsave mode
+   uint16_t gear;                                                                // for armming
+   uint16_t throttle;
+   uint16_t def_gear ;                                                           // for armming
+   uint16_t def_throttle;
+
+   // internal packet data
+   BT_TRANSMITTER_CHANNEL_INFO channel_data[SPEKTRUM_MAX_CHANNEL];
 
    // send to fc
    uint8_t fc_tx_buffer[SERIAL_RX_TRANSMITTER_MAX_SIZE];
@@ -273,7 +289,7 @@ typedef struct _PROJECT
 #define MILLI_SECOND_TO_TICK_COUNT(ms)                   ((RTC_HZ_FOR_TICK_COUNT * ms) / MILLI_SECOND)
 #define SECOND_TO_TICK_COUNT(s)                          (RTC_HZ_FOR_TICK_COUNT * s)
 #define TICK_COUNT_TO_MILLI_SECOND(count)                ((count * MILLI_SECOND) / RTC_HZ_FOR_TICK_COUNT)
-#define TICK_COUNT_TO_SECOND(count)                      (count * MILLI_SECOND / RTC_HZ_FOR_TICK_COUNT)
+#define TICK_COUNT_TO_SECOND(count)                      (count / RTC_HZ_FOR_TICK_COUNT)
 
 // -----------------------------------------------------------------------------
 static PROJECT gProject[1]                               =
@@ -282,16 +298,6 @@ static PROJECT gProject[1]                               =
       .mode                                              = PROJECT_INIT_STATUS,
    },
 };
-
-
-// -----------------------------------------------------------------------------
-// for failsafe mode
-#define FAILSAFE_MODE_TIME_OUT_SECOND                    30
-typedef struct
-{
-   uint16_t channel_id;
-   uint16_t value;
-} FAILSAFE_MODE_VALUE;
 
 // -----------------------------------------------------------------------------
 // ...
@@ -448,6 +454,24 @@ static void serial_receiver_timer_handler(void * p_context)
 }
 
 
+
+/******************************************************************
+ *
+ * Function Name : make_channel_data()
+ *   make channel data from bt stream
+ *
+ ******************************************************************/
+static void make_channel_data(uint16_t* p_bt_channel_data)
+{
+   int i;
+   for (i = 0; i < SPEKTRUM_MAX_CHANNEL; i++)
+   {
+      gProject->channel_data[i].channel_id               = ((p_bt_channel_data[i] >> 4) & 0x0F);
+      gProject->channel_data[i].value                    = ((p_bt_channel_data[i] >> 8) & 0x00FF) |
+                                                           ((p_bt_channel_data[i] << 8) & 0x0F00) ;
+   }
+}
+
 // -----------------------------------------------------------------------------
 // for protocol of transmitter
 #if defined(SERIAL_RECEIVER)
@@ -516,26 +540,13 @@ typedef struct _RX_PACKET_SPEKTRUM_1024
  *   covert packet of bt to packet of fc 
  *
  ******************************************************************/
-static int bt_packet_to_fc_packet(uint16_t* p_bt_channel_info, uint8_t bt_channel_count, void* p_fc_packet, uint8_t* p_fc_acket_size)
+static int bt_packet_to_fc_packet()
 {
-   uint16_t bt_channel_index;
-   uint16_t spektrum_channel_index;
+   uint16_t i;
+   uint16_t spektrum_channel_index                       = 0;
 
-   uint16_t channel_id;
-   uint16_t channel_value;
-
-   RX_PACKET_SPEKTRUM_1024* pRxPacketSpektrum1024        = (RX_PACKET_SPEKTRUM_1024*) p_fc_packet;
-
-   if (*p_fc_acket_size < sizeof(RX_PACKET_SPEKTRUM_1024))
-   {
-#if defined(DEBUG_RTT_ERROR)
-      NRF_LOG_PRINTF("[%s-%d] wrong channel data : %d less than %d \r\n", __FUNCTION__, __LINE__, *p_fc_acket_size, sizeof(RX_PACKET_SPEKTRUM_1024));
-#endif
-      return -1;
-   }
-
-   // packet size of SPEKTRUM 1024
-   *p_fc_acket_size                                      = sizeof(RX_PACKET_SPEKTRUM_1024);
+   RX_PACKET_SPEKTRUM_1024* pRxPacketSpektrum1024        = (RX_PACKET_SPEKTRUM_1024*) gProject->fc_tx_buffer;
+   gProject->fc_tx_packet_size                           = sizeof(RX_PACKET_SPEKTRUM_1024);
 
    // header of spektrum's 1024
    pRxPacketSpektrum1024->fades                          = 0x0;
@@ -545,45 +556,20 @@ static int bt_packet_to_fc_packet(uint16_t* p_bt_channel_info, uint8_t bt_channe
    NRF_LOG_PRINTF("------------------------------------------------------------- \r\n");
 #endif
 
-   for (bt_channel_index = 0, spektrum_channel_index = 0;
-        bt_channel_index < bt_channel_count && spektrum_channel_index < MAX_SPEKTRUM_CHANNEL_NUM;
-        bt_channel_index++, spektrum_channel_index++)
+   for (i = 0; i < SPEKTRUM_MAX_CHANNEL; i++)
    {
-      channel_id                                         = ((p_bt_channel_info[bt_channel_index] >> 4) & 0x0F);
-      channel_value                                      = ((p_bt_channel_info[bt_channel_index] >> 8) & 0x00FF) |
-                                                           ((p_bt_channel_info[bt_channel_index] << 8) & 0x0F00) ;
-
-#if 0
-      pRxPacketSpektrum1024->channel[spektrum_channel_index] = (SPEKTRUM_1024_CHANID_MASK & (channel_id << SPEKTRUM_1024_CHANNEL_SHIFT_BITS)) |
-                                                               (SPEKTRUM_1024_SXPOS_MASK & channel_value);
-#endif
-      pRxPacketSpektrum1024->channel[spektrum_channel_index] = (channel_id << 2) | ((channel_value << 8) & 0xFF00) | ((channel_value >> 8) & 0x3);
-
-      NRF_LOG_PRINTF("[%d] : id = %2d, v = %4d    [0x%04X] \r\n", bt_channel_index, channel_id, channel_value, pRxPacketSpektrum1024->channel[spektrum_channel_index] );
-#if 0
+      if (gProject->channel_data[i].channel_id < MAX_SPEKTRUM_CHANNEL_NUM)
+      {
+         pRxPacketSpektrum1024->channel[spektrum_channel_index] = (gProject->channel_data[i].channel_id << 2)           |
+                                                                  ((gProject->channel_data[i].value << 8) & 0xFF00)     |
+                                                                  ((gProject->channel_data[i].value >> 8) & 0x3);
+         spektrum_channel_index++;
 #if defined(DEBUG_OUTPUT_BT_CHANNEL_PARSER)
-      NRF_LOG_PRINTF("[%d] \r\n", bt_channel_index);
-
-      NRF_LOG_PRINTF("Channel Data of original \r\n");
-      NRF_LOG_HEX(p_bt_channel_info[bt_channel_index]);
-
-      NRF_LOG_PRINTF("\r\nChannel id    : %d \r\n", channel_id);
-      NRF_LOG_PRINTF("Channel value : %d \r\n", channel_value);
-      NRF_LOG_PRINTF("hexa : 0x%04X \r\n", pRxPacketSpektrum1024->channel[spektrum_channel_index]);
-      NRF_LOG_PRINTF("[%2d] : CH(%2d), VALUE(%4d) : [0x%04X] org - [0x%04X] \r\n", bt_channel_index
-                                                            channel_id,
-                                                            channel_value,
-                                                            spektrum_channel_index,
-                                                            p_bt_channel_info[bt_channel_index],
-                                                            pRxPacketSpektrum1024->channel[spektrum_channel_index]);
+         NRF_LOG_PRINTF("channel id : %2d, value = %4d \r\n", gProject->channel_data[i].channel_id, gProject->channel_data[i].value);
 #endif
-#endif
-
-#if 0
-      pRxPacketSpektrum1024->channel[spektrum_channel_index] = (SPEKTRUM_1024_CHANID_MASK & (p_bt_channel_info[bt_channel_index] >> 2)) |
-                                                               (SPEKTRUM_1024_SXPOS_MASK & p_bt_channel_info[bt_channel_index]);
-#endif
+      }
    }
+
 #if defined(DEBUG_OUTPUT_BT_CHANNEL_PARSER)
    NRF_LOG_PRINTF("------------------------------------------------------------- \r\n");
 #endif
@@ -592,25 +578,25 @@ static int bt_packet_to_fc_packet(uint16_t* p_bt_channel_info, uint8_t bt_channe
 
 // -----------------------------------------------------------------------------
 // default value for failsafe mode ...
-static FAILSAFE_MODE_VALUE g_failsafe_value[SPEKTRUM_MAX_CHANNEL] =
+static BT_TRANSMITTER_CHANNEL_INFO g_failsafe_value[SPEKTRUM_MAX_CHANNEL] =
 {
    { (SPEKTRUM_CHANNEL_ROLL),      512},
    { (SPEKTRUM_CHANNEL_PITCH),     512},
    { (SPEKTRUM_CHANNEL_YAW),       512},
-   { (SPEKTRUM_CHANNEL_THROTTLE),  100},
-   { (SPEKTRUM_CHANNEL_GEAR),      100},
-   { (SPEKTRUM_CHANNEL_AUX_1),     512},
-   { (SPEKTRUM_CHANNEL_AUX_2),     512},
-   { (SPEKTRUM_CHANNEL_AUX_3),     512},
-   { (SPEKTRUM_CHANNEL_AUX_4),     512},
-   { (SPEKTRUM_CHANNEL_AUX_5),     512},
-   { (SPEKTRUM_CHANNEL_AUX_6),     512},
-   { (SPEKTRUM_CHANNEL_AUX_7),     512},
+   { (SPEKTRUM_CHANNEL_THROTTLE),  0},
+   { (SPEKTRUM_CHANNEL_GEAR),      0},
+   { (SPEKTRUM_CHANNEL_AUX_1),     0},
+   { (SPEKTRUM_CHANNEL_AUX_2),     0},
+   { (SPEKTRUM_CHANNEL_AUX_3),     0},
+   { (SPEKTRUM_CHANNEL_AUX_4),     0},
+   { (SPEKTRUM_CHANNEL_AUX_5),     0},
+   { (SPEKTRUM_CHANNEL_AUX_6),     0},
+   { (SPEKTRUM_CHANNEL_AUX_7),     0},
 };
 
 /******************************************************************
  *
- * Function Name : bt_packet_to_fc_packet()
+ * Function Name : default_fc_packet()
  *   covert packet of bt to packet of fc 
  *
  ******************************************************************/
@@ -633,19 +619,13 @@ static int default_fc_packet(void* p_fc_packet, uint8_t* p_fc_acket_size)
    pRxPacketSpektrum1024->fades                          = 0x0;
    pRxPacketSpektrum1024->system                         = SPEKTRUM_DSM2_22MS;
 
-   for (i = 0; i < MAX_SPEKTRUM_CHANNEL_NUM; i++)
+   for (i = 0; i < SPEKTRUM_MAX_CHANNEL; i++)
    {
-#if 0
-      pRxPacketSpektrum1024->channel[i]                  = (g_failsafe_value[i].channel_id | g_failsafe_value[i].value);
-#endif
-      pRxPacketSpektrum1024->channel[i]                  = (g_failsafe_value[i].channel_id << 2) |
-                                                           ((g_failsafe_value[i].value << 8) & 0xFF00) |
-                                                           ((g_failsafe_value[i].value >> 8) & 0x3);
+      gProject->channel_data[i].channel_id            = g_failsafe_value[i].channel_id;
+      gProject->channel_data[i].value                 = g_failsafe_value[i].value;
    }
    return 0;
 }
-
-
 
 // -----------------------------------------------------------------------------
 #elif defined(SERIAL_RX_SPEKTRUM_2048)
@@ -691,19 +671,12 @@ static void timer_send_msg_to_fc_controller(void* pdata)
 #if defined(DEBUG_OUTPUT_FC_CHANNEL_DATA)
 // To output string per about 2 seconds
 static int msg_output_count                              = 0;
-
    if (((msg_output_count++) % 90) == 0)
    {
       NRF_LOG_PRINTF("send packet to the FC \r\n");
    }
 #endif
 
-   if (gProject->internal_tx_packet_size > 0)
-   {
-      memcpy(gProject->fc_tx_buffer, gProject->internal_tx_buffer, gProject->internal_tx_packet_size);
-      gProject->fc_tx_packet_size                        = gProject->internal_tx_packet_size;
-      gProject->internal_tx_packet_size                  = 0;
-   }
    for (i = 0; i < (gProject->fc_tx_packet_size); i++)
    {
       retry_count                                        = 0;
@@ -852,7 +825,6 @@ static int parsing_status_index                          = 0;
                return;
             }
             break;
-            break;
 
          case PROTOCOL_CHANNEL_MESSAGE :
             pbtProtocolResponse->command                 = PROTOCOL_UNKNOWN_RESPONSE;
@@ -926,6 +898,22 @@ static int parsing_status_index                          = 0;
          return;
       }
 
+      if (IS_PROJECT_READY_STATUS(gProject->mode) == PROJECT_READY_STATUS)
+      {
+         if (IS_PROJECT_FAILSAFE_MODE(gProject->mode) != PROJECT_FAILSAFE_MODE)
+         {
+            SET_PROJECT_NORMAL_STATUS(gProject->mode);
+            app_timer_cnt_get(&gProject->last_alive_tick_count);
+
+            gProject->parsing_result_code                = ERROR_UNKNOWN_COMMAND;
+
+            // result code
+            pbtProtocolResponse->option_1_high           = 0;
+            pbtProtocolResponse->option_1_low            = ERROR_UNKNOWN_COMMAND;
+            return;
+
+         }
+      }
       switch (pbtProtocolCommand->command)
       {
          case PROTOCOL_REGISTER_MESSAGE :
@@ -945,7 +933,6 @@ static int parsing_status_index                          = 0;
             {
                // register client
                gProject->register_client                 = 1;
-               app_timer_cnt_get(&gProject->last_alive_tick_count);
                return;
             }
             break;
@@ -955,19 +942,16 @@ static int parsing_status_index                          = 0;
                                                            (pbtProtocolCommand->option_1_low  << 16) |
                                                            (pbtProtocolCommand->option_2_high << 8) |
                                                            (pbtProtocolCommand->option_1_low);
-            app_timer_cnt_get(&gProject->last_alive_tick_count);
             return;
 
          case PROTOCOL_CHANNEL_MESSAGE :
             pbtProtocolChannelData                       = (BT_PROTOCOL_DATA*) gProject->bt_rx_buffer;
 
-            gProject->internal_tx_packet_size            = SERIAL_RX_TRANSMITTER_MAX_SIZE;
-            if (bt_packet_to_fc_packet(&(pbtProtocolChannelData->channel_1), SPEKTRUM_MAX_CHANNEL,
-                                       (void*) gProject->internal_tx_buffer, &gProject->internal_tx_packet_size) < 0)
-            {
-            }
-            app_timer_cnt_get(&gProject->last_alive_tick_count);
-            SET_PROJECT_NORMAL_STATUS(gProject->mode);
+            // make channel data of internel from bt stream
+            make_channel_data(&(pbtProtocolChannelData->channel_1));
+
+            // make packet for fc from internel channel data
+            bt_packet_to_fc_packet();
             return;
 
          default :
@@ -1038,14 +1022,124 @@ static void timer_failsafe_mode(void* pdata)
    app_timer_cnt_get(&cur_tick_count);
    app_timer_cnt_diff_compute(cur_tick_count, gProject->last_alive_tick_count, &diff_tick_count);
 
+   if (IS_PROJECT_READY_STATUS(gProject->mode) == PROJECT_READY_STATUS)
+   {
+      return;
+   }
+
    if (TICK_COUNT_TO_SECOND(diff_tick_count) > FAILSAFE_MODE_TIME_OUT_SECOND)
    {
-      if (IS_PROJECT_FAILSAFE_MODE(gProject->mode) == 0)
+      if (IS_PROJECT_FAILSAFE_MODE(gProject->mode) != PROJECT_FAILSAFE_MODE)
       {
+         uint16_t i;
+         uint16_t roll, pitch, yaw;
+#if defined(DEBUG_OUTPUT_FAILSAFE_MODE)
+         NRF_LOG_PRINTF("[%s-%d] enter failsafe mode : %d, %d \r\n", __FUNCTION__, __LINE__, TICK_COUNT_TO_SECOND(diff_tick_count), diff_tick_count);
+#endif
          gProject->enter_failsafe_mode_tick_count        = cur_tick_count;
-      }
+         SET_PROJECT_NORMAL_STATUS(gProject->mode);
+         SET_PROJECT_FAILSAFE_MODE(gProject->mode);
 
-      SET_PROJECT_FAILSAFE_MODE(gProject->mode);
+         for (i = 0; i < SPEKTRUM_MAX_CHANNEL; i++)
+         {
+            if (g_failsafe_value[i].channel_id == SPEKTRUM_CHANNEL_ROLL)
+            {
+               roll                                      = g_failsafe_value[i].value;
+            }
+            else if (g_failsafe_value[i].channel_id == SPEKTRUM_CHANNEL_PITCH)
+            {
+               pitch                                     = g_failsafe_value[i].value;
+            }
+            else if (g_failsafe_value[i].channel_id == SPEKTRUM_CHANNEL_YAW)
+            {
+               yaw                                       = g_failsafe_value[i].value;
+            }
+            else if (g_failsafe_value[i].channel_id == SPEKTRUM_CHANNEL_THROTTLE)
+            {
+               gProject->def_throttle                    = g_failsafe_value[i].value;
+            }
+            else if (g_failsafe_value[i].channel_id == SPEKTRUM_CHANNEL_GEAR)
+            {
+               gProject->def_gear                        = g_failsafe_value[i].value;
+            }
+         }
+
+         for (i = 0; i < SPEKTRUM_MAX_CHANNEL; i++)
+         {
+            if (gProject->channel_data[i].channel_id == SPEKTRUM_CHANNEL_ROLL)
+            {
+               gProject->channel_data[i].value           = roll;
+            }
+            else if (gProject->channel_data[i].channel_id == SPEKTRUM_CHANNEL_PITCH)
+            {
+               gProject->channel_data[i].value           = pitch;
+            }
+            else if (gProject->channel_data[i].channel_id == SPEKTRUM_CHANNEL_YAW)
+            {
+               gProject->channel_data[i].value           = yaw;
+            }
+            else if (gProject->channel_data[i].channel_id == SPEKTRUM_CHANNEL_THROTTLE)
+            {
+               gProject->throttle                        = gProject->channel_data[i].value;
+            }
+            else if (gProject->channel_data[i].channel_id == SPEKTRUM_CHANNEL_GEAR)
+            {
+               gProject->gear                            = gProject->channel_data[i].value;
+            }
+            else
+            {
+               gProject->channel_data[i].value           = 0;
+            }
+         }
+      }
+   }
+
+   if (IS_PROJECT_FAILSAFE_MODE(gProject->mode) == PROJECT_FAILSAFE_MODE)
+   {
+      uint16_t i;
+      app_timer_cnt_diff_compute(cur_tick_count, gProject->enter_failsafe_mode_tick_count, &diff_tick_count);
+      if (TICK_COUNT_TO_SECOND(diff_tick_count) > FAILSAFE_MODE_TIME_RUN_SECOND)
+      {
+         if (gProject->gear <= gProject->def_gear)
+         {
+            gProject->gear                               = gProject->def_gear;
+            gProject->throttle                           = gProject->def_throttle;
+            RESET_PROJECT_FAILSAFE_MODE(gProject->mode);
+            SET_PROJECT_READY_STATUS(gProject->mode);
+#if defined(DEBUG_OUTPUT_FAILSAFE_MODE)
+            NRF_LOG_PRINTF("[%s-%d] enter normal mode : %d, %d \r\n", __FUNCTION__, __LINE__);
+#endif
+         }
+         else
+         {
+            if (gProject->throttle <= (gProject->def_throttle + 11))
+            {
+               gProject->gear                            = gProject->def_gear;
+               gProject->throttle                        = gProject->def_throttle;
+               RESET_PROJECT_FAILSAFE_MODE(gProject->mode);
+               SET_PROJECT_READY_STATUS(gProject->mode);
+#if defined(DEBUG_OUTPUT_FAILSAFE_MODE)
+               NRF_LOG_PRINTF("[%s-%d] enter normal mode : %d, %d \r\n", __FUNCTION__, __LINE__);
+#endif
+            }
+            else
+            {
+               gProject->throttle -= 10;
+            }
+         }
+      }
+      for (i = 0; i < SPEKTRUM_MAX_CHANNEL; i++)
+      {
+         if (gProject->channel_data[i].channel_id == SPEKTRUM_CHANNEL_THROTTLE)
+         {
+            gProject->channel_data[i].value              = gProject->throttle;
+         }
+         else if (gProject->channel_data[i].channel_id == SPEKTRUM_CHANNEL_GEAR)
+         {
+            gProject->channel_data[i].value              = gProject->gear;
+         }
+      }
+      bt_packet_to_fc_packet();
    }
 }
 
@@ -1141,18 +1235,26 @@ static void nus_data_handler(ble_nus_t * p_nus, uint8_t * p_data, uint16_t lengt
    }
    else if (length == PROTOCOL_PACKET_EXTRA_SIZE)
    {
+#if defined(DEBUG_OUTPUT_BT_RECEIVED_DATA)
       NRF_LOG_PRINTF("Channel Data : %d bytes(internal length : %d) \r\n", length, gProject->received_rx_length);
+#endif
       if (gProject->received_rx_length > 0)
       {
          // second packet of channel
+#if defined(DEBUG_OUTPUT_BT_RECEIVED_DATA)
          NRF_LOG_PRINTF("second 16 bytes \r\n");
+#endif
          for (i = 0; i < PROTOCOL_PACKET_EXTRA_SIZE; i++)
          {
             gProject->bt_rx_buffer[PROTOCOL_PACKET_EXTRA_SIZE + i] = *(p_data + i);
+#if defined(DEBUG_OUTPUT_BT_RECEIVED_DATA)
             NRF_LOG_HEX(gProject->bt_rx_buffer[PROTOCOL_PACKET_EXTRA_SIZE + i]);
             NRF_LOG_PRINTF("  ");
+#endif
          }
+#if defined(DEBUG_OUTPUT_BT_RECEIVED_DATA)
          NRF_LOG_PRINTF("\r\n");
+#endif
          gProject->received_rx_length                    += length;
          gProject->received_rx_packet_complete           = 1;
 #if defined(DEBUG_OUTPUT_BT_RECEIVED_DATA)
@@ -1162,14 +1264,20 @@ static void nus_data_handler(ble_nus_t * p_nus, uint8_t * p_data, uint16_t lengt
       else
       {
          // first packet of channel
+#if defined(DEBUG_OUTPUT_BT_RECEIVED_DATA)
          NRF_LOG_PRINTF("first 16 bytes \r\n");
+#endif
          for (i = 0; i < PROTOCOL_PACKET_EXTRA_SIZE; i++)
          {
             gProject->bt_rx_buffer[i]                    = *(p_data + i);
+#if defined(DEBUG_OUTPUT_BT_RECEIVED_DATA)
             NRF_LOG_HEX(gProject->bt_rx_buffer[i]);
             NRF_LOG_PRINTF("  ");
+#endif
          }
+#if defined(DEBUG_OUTPUT_BT_RECEIVED_DATA)
          NRF_LOG_PRINTF("\r\n");
+#endif
          gProject->received_rx_length                    = length;
 #if defined(DEBUG_OUTPUT_BT_RECEIVED_DATA)
          NRF_LOG_PRINTF("first packet of channel ");
@@ -1697,6 +1805,7 @@ int main(void)
    // make default packet
    gProject->fc_tx_packet_size                        = SERIAL_RX_TRANSMITTER_MAX_SIZE;
    default_fc_packet(gProject->fc_tx_buffer, &gProject->fc_tx_packet_size);
+   bt_packet_to_fc_packet();
 
    add_timer(timer_send_msg_to_fc_controller, SERIAL_RX_SEND_TO_FC_TIMER, -1, NULL);
    add_timer(timer_bt_command_parser, SERIAL_RX_COMMAND_PARSING_TIMER, -1, NULL);
