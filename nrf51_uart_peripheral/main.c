@@ -53,6 +53,7 @@
 // #define DEBUG_OUTPUT_FC_CHANNEL_DATA
 // #define DEBUG_OUTPUT_BT_RESPONSE
 #define DEBUG_OUTPUT_FAILSAFE_MODE
+#define DEBUG_OUTPUT_BLE_EVENT
 
 // -----------------------------------------------------------------------------
 // for debugging...
@@ -96,8 +97,8 @@
 //             : Default                    : AETR1234, (ROLL, PITCH, THROTTLE, YAW)
 #define SPEKTRUM_CHANNEL_ROLL                            0
 #define SPEKTRUM_CHANNEL_PITCH                           1
-#define SPEKTRUM_CHANNEL_YAW                             3
 #define SPEKTRUM_CHANNEL_THROTTLE                        2
+#define SPEKTRUM_CHANNEL_YAW                             3
 #define SPEKTRUM_CHANNEL_GEAR                            4
 #define SPEKTRUM_CHANNEL_AUX_1                           5
 #define SPEKTRUM_CHANNEL_AUX_2                           6
@@ -173,28 +174,30 @@ enum PROJECT_MODE
    PROJECT_STATUS_MASK                                   = 0x0000FFFF,
    PROJECT_STATUS_UNMASK                                 = 0xFFFF0000,
 
-   PROJECT_FAILSAFE_MODE                                 = 0x08000000,
+   PROJECT_BLE_DISCONNECTED                              = 0x00010000,
+   PROJECT_BLE_CONNECTED                                 = 0x00020000,
+   PROJECT_BLE_CONNECT_MASK                              = 0x000F0000,
+   PROJECT_BLE_CONNECT_UNMASK                            = 0xFFF0FFFF,
+
+   PROJECT_FAILSAFE_MODE                                 = 0x01000000,
    PROJECT_FAILSAFE_MASK                                 = 0x0F000000,
    PROJECT_FAILSAFE_UNMASK                               = 0xF0FFFFFF,
-
-   PROJECT_FAIL_STATUS                                   = 0x80000000,
 };
-
-#define SET_PROJECT_INIT_STATUS(x)                       (x = ((x & PROJECT_STATUS_UNMASK) | PROJECT_INIT_STATUS))
-#define IS_PROJECT_INIT_STATUS(x)                        (x & PROJECT_INIT_STATUS)
+#define SET_PROJECT_INIT_STATUS(x)                       (x = PROJECT_INIT_STATUS)
 
 #define SET_PROJECT_READY_STATUS(x)                      (x = ((x & PROJECT_STATUS_UNMASK) | PROJECT_READY_STATUS))
-#define IS_PROJECT_READY_STATUS(x)                       (x & PROJECT_READY_STATUS)
+#define IS_PROJECT_READY_STATUS(x)                       ((x & PROJECT_READY_STATUS) == PROJECT_READY_STATUS ? 1 : 0)
 
 #define SET_PROJECT_NORMAL_STATUS(x)                     (x = ((x & PROJECT_STATUS_UNMASK) | PROJECT_NORMAL_STATUS))
-#define IS_PROJECT_NORMAL_STATUS(x)                      (x & PROJECT_NORMAL_STATUS)
+#define IS_PROJECT_NORMAL_STATUS(x)                      ((x & PROJECT_NORMAL_STATUS) == PROJECT_NORMAL_STATUS ? 1 : 0)
+
+#define SET_PROJECT_BLE_DISCONNECTED(x)                  (x = ((x & PROJECT_BLE_CONNECT_UNMASK) | PROJECT_BLE_DISCONNECTED))
+#define SET_PROJECT_BLE_CONNECTED(x)                     (x = ((x & PROJECT_BLE_CONNECT_UNMASK) | PROJECT_BLE_CONNECTED))
+#define IS_PROJECT_BLE_CONNECTED(x)                      ((x & PROJECT_BLE_CONNECTED) == PROJECT_BLE_CONNECTED ? 1 : 0)
 
 #define SET_PROJECT_FAILSAFE_MODE(x)                     (x = ((x & PROJECT_FAILSAFE_UNMASK) | PROJECT_FAILSAFE_MODE))
 #define RESET_PROJECT_FAILSAFE_MODE(x)                   (x = (x & PROJECT_FAILSAFE_UNMASK))
-#define IS_PROJECT_FAILSAFE_MODE(x)                      (x & PROJECT_FAILSAFE_MODE)
-
-#define SET_PROJECT_FAIL_STATUS(x)                       (x = (x | PROJECT_FAIL_STATUS))
-#define IS_PROJECT_FAIL_STATUS(x)                        (x & PROJECT_FAIL_STATUS)
+#define IS_PROJECT_FAILSAFE_MODE(x)                      ((x & PROJECT_FAILSAFE_MODE) == PROJECT_FAILSAFE_MODE ? 1 : 0)
 
 // -----------------------------------------------------------------------------
 enum RESPONSE_ERROR_CODE
@@ -228,8 +231,7 @@ typedef struct _TIMER
 
 // -----------------------------------------------------------------------------
 // for failsafe mode
-#define FAILSAFE_MODE_TIME_OUT_SECOND                    10
-#define FAILSAFE_MODE_TIME_RUN_SECOND                    5
+#define FAILSAFE_MODE_TIME_OUT_SECOND                    15
 typedef struct
 {
    uint8_t channel_id;
@@ -254,12 +256,6 @@ typedef struct _PROJECT
 
    // tick counter when enter failsafe mode
    uint32_t enter_failsafe_mode_tick_count;
-
-   // use in failsave mode
-   uint16_t gear;                                                                // for armming
-   uint16_t throttle;
-   uint16_t def_gear ;                                                           // for armming
-   uint16_t def_throttle;
 
    // internal packet data
    BT_TRANSMITTER_CHANNEL_INFO channel_data[SPEKTRUM_MAX_CHANNEL];
@@ -464,10 +460,12 @@ static void serial_receiver_timer_handler(void * p_context)
 static void make_channel_data(uint16_t* p_bt_channel_data)
 {
    int i;
+   int channel_id;
    for (i = 0; i < SPEKTRUM_MAX_CHANNEL; i++)
    {
-      gProject->channel_data[i].channel_id               = ((p_bt_channel_data[i] >> 4) & 0x0F);
-      gProject->channel_data[i].value                    = ((p_bt_channel_data[i] >> 8) & 0x00FF) |
+      channel_id                                         = ((p_bt_channel_data[i] >> 4) & 0x0F);
+      gProject->channel_data[channel_id].channel_id      = channel_id;
+      gProject->channel_data[channel_id].value           = ((p_bt_channel_data[i] >> 8) & 0x00FF) |
                                                            ((p_bt_channel_data[i] << 8) & 0x0F00) ;
    }
 }
@@ -582,8 +580,8 @@ static BT_TRANSMITTER_CHANNEL_INFO g_failsafe_value[SPEKTRUM_MAX_CHANNEL] =
 {
    { (SPEKTRUM_CHANNEL_ROLL),      512},
    { (SPEKTRUM_CHANNEL_PITCH),     512},
-   { (SPEKTRUM_CHANNEL_YAW),       512},
    { (SPEKTRUM_CHANNEL_THROTTLE),  0},
+   { (SPEKTRUM_CHANNEL_YAW),       512},
    { (SPEKTRUM_CHANNEL_GEAR),      0},
    { (SPEKTRUM_CHANNEL_AUX_1),     0},
    { (SPEKTRUM_CHANNEL_AUX_2),     0},
@@ -898,22 +896,8 @@ static int parsing_status_index                          = 0;
          return;
       }
 
-      if (IS_PROJECT_READY_STATUS(gProject->mode) == PROJECT_READY_STATUS)
-      {
-         if (IS_PROJECT_FAILSAFE_MODE(gProject->mode) != PROJECT_FAILSAFE_MODE)
-         {
-            SET_PROJECT_NORMAL_STATUS(gProject->mode);
-            app_timer_cnt_get(&gProject->last_alive_tick_count);
-
-            gProject->parsing_result_code                = ERROR_UNKNOWN_COMMAND;
-
-            // result code
-            pbtProtocolResponse->option_1_high           = 0;
-            pbtProtocolResponse->option_1_low            = ERROR_UNKNOWN_COMMAND;
-            return;
-
-         }
-      }
+      SET_PROJECT_NORMAL_STATUS(gProject->mode);
+      app_timer_cnt_get(&(gProject->last_alive_tick_count));
       switch (pbtProtocolCommand->command)
       {
          case PROTOCOL_REGISTER_MESSAGE :
@@ -1022,6 +1006,51 @@ static void timer_failsafe_mode(void* pdata)
    app_timer_cnt_get(&cur_tick_count);
    app_timer_cnt_diff_compute(cur_tick_count, gProject->last_alive_tick_count, &diff_tick_count);
 
+#if defined(DEBUG_OUTPUT_FAILSAFE_MODE)
+//   NRF_LOG_PRINTF("[%s-%d] failsafe mode : %d, %d \r\n", __FUNCTION__, __LINE__, TICK_COUNT_TO_SECOND(diff_tick_count), diff_tick_count);
+#endif
+
+   if (IS_PROJECT_FAILSAFE_MODE(gProject->mode))
+   {
+      gProject->channel_data[SPEKTRUM_CHANNEL_ROLL].value   = g_failsafe_value[SPEKTRUM_CHANNEL_ROLL].value;
+      gProject->channel_data[SPEKTRUM_CHANNEL_PITCH].value  = g_failsafe_value[SPEKTRUM_CHANNEL_PITCH].value;
+      gProject->channel_data[SPEKTRUM_CHANNEL_YAW].value    = g_failsafe_value[SPEKTRUM_CHANNEL_YAW].value;
+      gProject->channel_data[SPEKTRUM_CHANNEL_AUX_1].value  = g_failsafe_value[SPEKTRUM_CHANNEL_AUX_1].value;
+      gProject->channel_data[SPEKTRUM_CHANNEL_AUX_2].value  = g_failsafe_value[SPEKTRUM_CHANNEL_AUX_2].value;
+      gProject->channel_data[SPEKTRUM_CHANNEL_AUX_3].value  = g_failsafe_value[SPEKTRUM_CHANNEL_AUX_3].value;
+      gProject->channel_data[SPEKTRUM_CHANNEL_AUX_4].value  = g_failsafe_value[SPEKTRUM_CHANNEL_AUX_4].value;
+      gProject->channel_data[SPEKTRUM_CHANNEL_AUX_5].value  = g_failsafe_value[SPEKTRUM_CHANNEL_AUX_5].value;
+      gProject->channel_data[SPEKTRUM_CHANNEL_AUX_6].value  = g_failsafe_value[SPEKTRUM_CHANNEL_AUX_6].value;
+      gProject->channel_data[SPEKTRUM_CHANNEL_AUX_7].value  = g_failsafe_value[SPEKTRUM_CHANNEL_AUX_7].value;
+
+      if (TICK_COUNT_TO_SECOND(diff_tick_count) > 2)
+      {
+         app_timer_cnt_get(&(gProject->last_alive_tick_count));
+
+         if (gProject->channel_data[SPEKTRUM_CHANNEL_GEAR].value > g_failsafe_value[SPEKTRUM_CHANNEL_GEAR].value)
+         {
+            if ((gProject->channel_data[SPEKTRUM_CHANNEL_THROTTLE].value + 11) > g_failsafe_value[SPEKTRUM_CHANNEL_THROTTLE].value)
+            {
+               gProject->channel_data[SPEKTRUM_CHANNEL_THROTTLE].value -= 10;
+            }
+         }
+         else
+         {
+            gProject->channel_data[SPEKTRUM_CHANNEL_GEAR].value = g_failsafe_value[SPEKTRUM_CHANNEL_GEAR].value;
+         }
+      }
+   }
+   else
+   {
+      if (TICK_COUNT_TO_SECOND(diff_tick_count) > FAILSAFE_MODE_TIME_OUT_SECOND)
+      {
+         SET_PROJECT_FAILSAFE_MODE(gProject->mode);
+         app_timer_cnt_get(&(gProject->last_alive_tick_count));
+      }
+   }
+
+
+#if 0
    if (IS_PROJECT_READY_STATUS(gProject->mode) == PROJECT_READY_STATUS)
    {
       return;
@@ -1141,6 +1170,7 @@ static void timer_failsafe_mode(void* pdata)
       }
       bt_packet_to_fc_packet();
    }
+#endif
 }
 
 
@@ -1435,38 +1465,64 @@ static void on_adv_evt(ble_adv_evt_t ble_adv_evt)
  */
 static void on_ble_evt(ble_evt_t * p_ble_evt)
 {
-    uint32_t                         err_code;
+   uint32_t err_code;
 
-    switch (p_ble_evt->header.evt_id)
-    {
-        case BLE_GAP_EVT_CONNECTED:
-            err_code = bsp_indication_set(BSP_INDICATE_CONNECTED);
-            APP_ERROR_CHECK(err_code);
-            m_conn_handle = p_ble_evt->evt.gap_evt.conn_handle;
-            break;
+   switch (p_ble_evt->header.evt_id)
+   {
+      case BLE_GAP_EVT_CONNECTED:
+         err_code                                        = bsp_indication_set(BSP_INDICATE_CONNECTED);
+         APP_ERROR_CHECK(err_code);
+         m_conn_handle                                   = p_ble_evt->evt.gap_evt.conn_handle;
+         RESET_PROJECT_FAILSAFE_MODE(gProject->mode);
+         SET_PROJECT_READY_STATUS(gProject->mode);
+         SET_PROJECT_BLE_CONNECTED(gProject->mode);
+         app_timer_cnt_get(&(gProject->last_alive_tick_count));
+#if defined(DEBUG_OUTPUT_BLE_EVENT)
+         NRF_LOG_PRINTF("[%s-%d] BLE Connected !!! \r\n", __FUNCTION__, __LINE__);
+#endif
+         break;
 
-        case BLE_GAP_EVT_DISCONNECTED:
-            err_code = bsp_indication_set(BSP_INDICATE_IDLE);
-            APP_ERROR_CHECK(err_code);
-            m_conn_handle = BLE_CONN_HANDLE_INVALID;
-            break;
+      case BLE_GAP_EVT_DISCONNECTED:
+         err_code                                        = bsp_indication_set(BSP_INDICATE_IDLE);
+         APP_ERROR_CHECK(err_code);
+         m_conn_handle                                   = BLE_CONN_HANDLE_INVALID;
+         if (IS_PROJECT_NORMAL_STATUS(gProject->mode))
+         {
+            SET_PROJECT_READY_STATUS(gProject->mode);
+            SET_PROJECT_FAILSAFE_MODE(gProject->mode);
+            app_timer_cnt_get(&(gProject->last_alive_tick_count));
+         }
+         SET_PROJECT_BLE_DISCONNECTED(gProject->mode);
+#if defined(DEBUG_OUTPUT_BLE_EVENT)
+         NRF_LOG_PRINTF("[%s-%d] BLE Disconnected !!! \r\n", __FUNCTION__, __LINE__);
+#endif
+         break;
 
-        case BLE_GAP_EVT_SEC_PARAMS_REQUEST:
-            // Pairing not supported
-            err_code = sd_ble_gap_sec_params_reply(m_conn_handle, BLE_GAP_SEC_STATUS_PAIRING_NOT_SUPP, NULL, NULL);
-            APP_ERROR_CHECK(err_code);
-            break;
+      case BLE_GAP_EVT_SEC_PARAMS_REQUEST:
+         // Pairing not supported
+         err_code                                        = sd_ble_gap_sec_params_reply(m_conn_handle, BLE_GAP_SEC_STATUS_PAIRING_NOT_SUPP, NULL, NULL);
+         APP_ERROR_CHECK(err_code);
+#if defined(DEBUG_OUTPUT_BLE_EVENT)
+         NRF_LOG_PRINTF("[%s-%d] BLE BLE_GAP_EVT_SEC_PARAMS_REQUEST !!!  \r\n", __FUNCTION__, __LINE__);
+#endif
+         break;
 
-        case BLE_GATTS_EVT_SYS_ATTR_MISSING:
-            // No system attributes have been stored.
-            err_code = sd_ble_gatts_sys_attr_set(m_conn_handle, NULL, 0, 0);
-            APP_ERROR_CHECK(err_code);
-            break;
+      case BLE_GATTS_EVT_SYS_ATTR_MISSING:
+         // No system attributes have been stored.
+         err_code                                        = sd_ble_gatts_sys_attr_set(m_conn_handle, NULL, 0, 0);
+         APP_ERROR_CHECK(err_code);
+#if defined(DEBUG_OUTPUT_BLE_EVENT)
+         NRF_LOG_PRINTF("[%s-%d] BLE_GATTS_EVT_SYS_ATTR_MISSING !!!  \r\n", __FUNCTION__, __LINE__);
+#endif
+         break;
 
-        default:
-            // No implementation needed.
-            break;
-    }
+      default:
+         // No implementation needed.
+#if defined(DEBUG_OUTPUT_BLE_EVENT)
+//         NRF_LOG_PRINTF("[%s-%d] 0x%x  \r\n", __FUNCTION__, __LINE__, p_ble_evt->header.evt_id);
+#endif
+         break;
+   }
 }
 
 
@@ -1784,7 +1840,6 @@ int main(void)
 #if defined(DEBUG_RTT_ERROR)
       NRF_LOG_PRINTF("[%s-%d] ble_advertising_start() failed : %d \r\n", __FUNCTION__, __LINE__, (int) err_code);
 #endif
-      SET_PROJECT_FAIL_STATUS(gProject->mode);
    }
    APP_ERROR_CHECK(err_code);
 
