@@ -137,6 +137,8 @@ void bt_transmitter_timer_handler(void* p_context)
    }
    else     // reset system time ... max about 36 hours
    {
+      NRF_LOG_PRINTF("[%s-%d] tick count : %d \r\n", __FUNCTION__, __LINE__, tick_count);
+
       g_bt_Project->system_time.milli_second             = 0;
       g_bt_Project->system_time.second                   = 0;
       g_bt_Project->tick_count                           = tick_count;
@@ -150,8 +152,11 @@ void bt_transmitter_timer_handler(void* p_context)
    {
       if (g_bt_Project->timer[i].is_allocate != 0)
       {
-         diff_tick_count                                 = g_bt_Project->tick_count - g_bt_Project->timer[i].tick_count;
+         app_timer_cnt_diff_compute(g_bt_Project->tick_count, g_bt_Project->timer[i].tick_count, &diff_tick_count);
+
+//         diff_tick_count                                 = g_bt_Project->tick_count - g_bt_Project->timer[i].tick_count;
          diff_milli_second                               = ((diff_tick_count * 1000) / (APP_TIMER_CLOCK_FREQ));
+
          if (diff_milli_second > g_bt_Project->timer[i].ms_elapse)
          {
             g_bt_Project->timer[i].tick_count            = g_bt_Project->tick_count;
