@@ -11,13 +11,15 @@
  *
  */
 
-#ifndef _BT_TRANSMITTER_TIMER_H_
-#define _BT_TRANSMITTER_TIMER_H_
+#ifndef _BT_TRANSMITTER_SPEKTRUM_1024_H_
+#define _BT_TRANSMITTER_SPEKTRUM_1024_H_
 
-int add_timer(BT_TRANSMITTER_TIMER_FN fn, uint32_t ms_elapse, int count, void* pdata);
-void delete_timer(BT_TRANSMITTER_TIMER_FN fn);
+#if defined(SERIAL_RX_SPEKTRUM_1024)
+#define SPEKTRUM_1024_SERIAL_RX_TIME                     22                      // 22 ms
 
-void bt_transmitter_timer_handler(void* p_context);
 
-#endif   // _BT_TRANSMITTER_TIMER_H_
+void fc_serial_rx_init(BT_TRANSMITTER_CHANNEL_INFO* pBtTransmitterChannelInfo);
+#endif
+
+#endif   // _BT_TRANSMITTER_SPEKTRUM_1024_H_
 

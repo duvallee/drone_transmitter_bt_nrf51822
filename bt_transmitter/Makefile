@@ -60,6 +60,8 @@ $(abspath ../examples/bsp/bsp.c) \
 $(abspath ../examples/bsp/bsp_btn_ble.c) \
 $(abspath main.c) \
 $(abspath bt_transmitter_timer.c) \
+$(abspath bt_transmitter_ble_service.c) \
+$(abspath bt_transmitter_spektrum_1024.c) \
 $(abspath ../components/ble/common/ble_advdata.c) \
 $(abspath ../components/ble/ble_advertising/ble_advertising.c) \
 $(abspath ../components/ble/common/ble_conn_params.c) \
@@ -112,6 +114,8 @@ BUILD_DIRECTORIES := $(sort $(OBJECT_DIRECTORY) $(OUTPUT_BINARY_DIRECTORY) $(LIS
 # CFLAGS  = -DNRF_LOG_USES_UART=1
 CFLAGS  = -DNRF_LOG_USES_RTT=1
 CFLAGS += -DBOARD_PCA10028
+CFLAGS += -DSERIAL_RX_SPEKTRUM_1024
+# CFLAGS += -DSERIAL_RX_SPEKTRUM_2048
 CFLAGS += -DSOFTDEVICE_PRESENT
 CFLAGS += -DNRF51
 CFLAGS += -DS130
