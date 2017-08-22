@@ -14,9 +14,6 @@
 #ifndef _BT_TRANSMITTER_BLE_SERVICE_H_
 #define _BT_TRANSMITTER_BLE_SERVICE_H_
 
-#define PROTOCOL_HEADER_HIGH_SYNC                        0xD7
-#define PROTOCOL_HEADER_LOW_SYNC                         0x5E
-
 void bt_transmitter_ble_data_handler(ble_nus_t* p_nus, uint8_t* p_data, uint16_t length);
 
 #endif   // _BT_TRANSMITTER_BLE_SERVICE_H_

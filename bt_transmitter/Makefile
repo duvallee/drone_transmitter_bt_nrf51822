@@ -62,6 +62,7 @@ $(abspath main.c) \
 $(abspath bt_transmitter_timer.c) \
 $(abspath bt_transmitter_ble_service.c) \
 $(abspath bt_transmitter_spektrum_1024.c) \
+$(abspath bt_transmitter_parser.c) \
 $(abspath ../components/ble/common/ble_advdata.c) \
 $(abspath ../components/ble/ble_advertising/ble_advertising.c) \
 $(abspath ../components/ble/common/ble_conn_params.c) \

@@ -41,7 +41,29 @@ void bt_transmitter_ble_data_handler(ble_nus_t* p_nus, uint8_t* p_data, uint16_t
    uint32_t i                                            = 0;
    uint8_t first_sync                                    = 0;
    uint8_t second_sync                                   = 0;
+   BT_PROTOCOL_BASE* pBt_Protocol_Base                   = NULL;
    UNUSED_VARIABLE(i);
+
+   if (g_bt_Project->bt_protocol_data.remain_packet_size > 0)
+   {
+      if (g_bt_Project->bt_protocol_data.remain_packet_size == length)
+      {
+         uint8_t* p_des_data                             = (uint8_t*) &(g_bt_Project->bt_protocol_data.bt_protocol_channel_data);
+         memcpy ((p_des_data + g_bt_Project->bt_protocol_data.received_packet_size), p_data, length);
+         g_bt_Project->bt_protocol_data.remain_packet_size = 0;
+         g_bt_Project->bt_protocol_data.received_packet_size = 0;
+         g_bt_Project->bt_protocol_data.complete_packet  = 1;
+      }
+      else
+      {
+#if defined(DEBUG_RTT_ERROR)
+         NRF_LOG_PRINTF("[%s-%d] size missmatched : %d \r\n", __FUNCTION__, __LINE__, length);
+#endif
+         g_bt_Project->bt_protocol_data.remain_packet_size = 0;
+         g_bt_Project->bt_protocol_data.received_packet_size = 0;
+         g_bt_Project->bt_protocol_data.complete_packet  = 0;
+      }
+   }
 
    for (i = 0; i < length; i++)
    {
@@ -64,11 +86,34 @@ void bt_transmitter_ble_data_handler(ble_nus_t* p_nus, uint8_t* p_data, uint16_t
    // found sync of packet (0xD7 0x5E)
    if (second_sync == 1)
    {
-      NRF_LOG_PRINTF("[%s-%d] found sync signal :  %d \r\n", __FUNCTION__, __LINE__, i);
-   }
+      uint8_t* p_des_data                                = (uint8_t*) &(g_bt_Project->bt_protocol_data.bt_protocol_channel_data);
+      pBt_Protocol_Base                                  = (BT_PROTOCOL_BASE *) &(p_data[i]);
+
+      if (pBt_Protocol_Base->size == length)
+      {
+         memcpy (p_des_data, p_data, length);
+         g_bt_Project->bt_protocol_data.remain_packet_size = 0;
+         g_bt_Project->bt_protocol_data.received_packet_size = 0;
+         g_bt_Project->bt_protocol_data.complete_packet  = 1;
+      }
+      else
+      {
+         memcpy (p_des_data, p_data, length);
+         g_bt_Project->bt_protocol_data.remain_packet_size = pBt_Protocol_Base->size - length;
+         g_bt_Project->bt_protocol_data.received_packet_size = length;
+         g_bt_Project->bt_protocol_data.complete_packet  = 0;
+      }
 
 #if defined(DEBUG_RTT_DEBUG)
+      NRF_LOG_PRINTF("[%s-%d] received len : %d \r\n", __FUNCTION__, __LINE__, length);
+      NRF_LOG_PRINTF("[%s-%d] packet cmd : 0x%02x, %d \r\n", __FUNCTION__, __LINE__, pBt_Protocol_Base->command, pBt_Protocol_Base->size);
+#endif
+   }
+
+#if 0
+#if defined(DEBUG_RTT_DEBUG)
    NRF_LOG_PRINTF("[%s-%d] received data : [0x%02X] [0x%02X]  %d \r\n", __FUNCTION__, __LINE__, *(p_data), *(p_data + 1), length);
+#endif
 #endif
 
 }

@@ -11,14 +11,10 @@
  *
  */
 
-#ifndef _BT_TRANSMITTER_SPEKTRUM_1024_H_
-#define _BT_TRANSMITTER_SPEKTRUM_1024_H_
+#ifndef _BT_TRANSMITTER_PARSER_H_
+#define _BT_TRANSMITTER_PARSER_H_
 
-#if defined(SERIAL_RX_SPEKTRUM_1024)
-#define SPEKTRUM_1024_SERIAL_RX_TIME                     22                      // 22 ms
+void bt_transmitter_parser();
 
-void fc_serial_rx_init(BT_TRANSMITTER_CHANNEL_INFO* pBtTransmitterChannelInfo);
-#endif
-
-#endif   // _BT_TRANSMITTER_SPEKTRUM_1024_H_
+#endif      // _BT_TRANSMITTER_PARSER_H_
 

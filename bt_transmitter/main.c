@@ -41,10 +41,12 @@
 #include "project.h"
 #include "bt_transmitter_timer.h"
 #include "bt_transmitter_ble_service.h"
+#include "bt_transmitter_parser.h"
 
 #if defined(SERIAL_RX_SPEKTRUM_1024)
 #include "bt_transmitter_spektrum_1024.h"
 #endif
+
 
 // -----------------------------------------------------------------------------
 // ...
@@ -808,6 +810,7 @@ int main(void)
    // Enter main loop.
    for (;;)
    {
+      bt_transmitter_parser();
       power_manage();
    }
 }

@@ -45,6 +45,7 @@ void bt_transmitter_serial_rx_spektrum_1024_timer(void* pArg)
    BT_TRANSMITTER_CHANNEL_INFO* pBtTransmitterChannelInfo = (BT_TRANSMITTER_CHANNEL_INFO*) pArg;
    UNUSED_VARIABLE(pBtTransmitterChannelInfo);
 
+#if 1
 #if defined(DEBUG_GPIO_PIN)
    if (nrf_gpio_pin_read(DEBUG_GPIO_PIN) == 0)
    {
@@ -54,6 +55,7 @@ void bt_transmitter_serial_rx_spektrum_1024_timer(void* pArg)
    {
       nrf_gpio_pin_write(DEBUG_GPIO_PIN, 0);
    }
+#endif
 #endif
 
    if (pBtTransmitterChannelInfo->channel_update)

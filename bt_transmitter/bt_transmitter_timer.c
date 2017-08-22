@@ -129,6 +129,19 @@ void bt_transmitter_timer_handler(void* p_context)
    UNUSED_VARIABLE(diff_milli_second);
    UNUSED_VARIABLE(i);
 
+#if 0
+#if defined(DEBUG_GPIO_PIN)
+   if (nrf_gpio_pin_read(DEBUG_GPIO_PIN) == 0)
+   {
+      nrf_gpio_pin_write(DEBUG_GPIO_PIN, 1);
+   }
+   else
+   {
+      nrf_gpio_pin_write(DEBUG_GPIO_PIN, 0);
+   }
+#endif
+#endif
+
    app_timer_cnt_get(&tick_count);
    if (g_bt_Project->tick_count < tick_count)
    {
@@ -137,6 +150,9 @@ void bt_transmitter_timer_handler(void* p_context)
    }
    else     // reset system time ... max about 36 hours
    {
+#if defined(DEBUG_RTT_ERROR)
+      NRF_LOG_PRINTF("[%s-%d] over time : %d \r\n", __FUNCTION__, __LINE__, g_bt_Project->tick_count);
+#endif
       g_bt_Project->system_time.milli_second             = 0;
       g_bt_Project->system_time.second                   = 0;
       g_bt_Project->tick_count                           = tick_count;
