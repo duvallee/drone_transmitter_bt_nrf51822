@@ -16,8 +16,8 @@
 
 #if defined(SERIAL_RX_SPEKTRUM_1024)
 #define SPEKTRUM_1024_SERIAL_RX_TIME                     22                      // 22 ms
-
 void fc_serial_rx_init(BT_TRANSMITTER_CHANNEL_INFO* pBtTransmitterChannelInfo);
+void bt_transmitter_make_packet(BT_TRANSMITTER_CHANNEL_INFO*);
 #endif
 
 #endif   // _BT_TRANSMITTER_SPEKTRUM_1024_H_

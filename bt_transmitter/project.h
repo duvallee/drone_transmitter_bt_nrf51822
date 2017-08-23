@@ -30,6 +30,14 @@
 #define PROTOCOL_HEADER_HIGH_SYNC                        0xD7
 #define PROTOCOL_HEADER_LOW_SYNC                         0x5E
 
+// -----------------------------------------------------------------------------
+// Error Code
+#define PROTOCOL_SUCCESS                                 0x00
+#define PROTOCOL_BUSY_ERROR                              0x01
+#define PROTOCOL_CRC_ERROR                               0x02
+#define PROTOCOL_MISSMATCHED_SIZE                        0x03
+#define PROTOCOL_UNKNOWN_COMMAND                         0xF0
+
 
 // -----------------------------------------------------------------------------
 // time
@@ -64,12 +72,13 @@ typedef void (*SEND_UART_FN)(uint8_t*, uint8_t);
 typedef struct _BT_TRANSMITTER_CHANNEL_INFO
 {
    uint8_t channel_num;
-   uint8_t channel_update;
+   uint8_t channel_data_complete;
+   uint8_t transmitter_start;
+
    SEND_UART_FN send_uart_fn;
    
    uint32_t channel[MAX_CHANNEL_INFO_COUNT];                                     // high 16 bit : channel id, low 16 bit : value
 } BT_TRANSMITTER_CHANNEL_INFO;
-
 
 // -----------------------------------------------------------------------------
 // protocol
@@ -126,9 +135,7 @@ typedef struct _BT_PROTOCOL_DATA
 {
    BT_PROTOCOL_CHANNEL_DATA bt_protocol_channel_data;
 
-   uint8_t remain_packet_size;
    uint8_t received_packet_size;
-
    uint8_t complete_packet;
 } __attribute__ ((__packed__)) BT_PROTOCOL_DATA;
 
@@ -140,16 +147,21 @@ typedef struct _BT_PROJECT
    uint32_t tick_count;
    BT_TRANSMITTER_TIME system_time;
 
+   uint8_t bt_connected;
+
    BT_TRANSMITTER_TIMER timer[BT_TRANSMITTER_MAX_TIMER];
 
    // received from bt
    BT_PROTOCOL_DATA bt_protocol_data;
 
+   // alive tick count
    uint32_t alive_receive_tick_count;
 
    // channel data for fc
    BT_TRANSMITTER_CHANNEL_INFO update_channel_data_for_fc;                       // channel info for the flight controller
 
+   // bt
+   ble_nus_t ble_nordic_uart_service;
 } BT_PROJECT;
 
 extern BT_PROJECT g_bt_Project[1];
@@ -157,8 +169,10 @@ extern BT_PROJECT g_bt_Project[1];
 
 #define DEBUG_RTT_DEBUG
 
-
+#if defined(DEBUG_RTT_DEBUG)
 #define DEBUG_GPIO_PIN                                   22
+#define DEBUG_GPIO_EXT_PIN                               24
+#endif
 
 #endif   // _PROJECT_H_
 

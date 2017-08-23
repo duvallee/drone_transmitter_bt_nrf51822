@@ -78,7 +78,6 @@
 #define UART_TX_BUF_SIZE                                 256                     /**< UART TX buffer size. */
 #define UART_RX_BUF_SIZE                                 256                     /**< UART RX buffer size. */
 
-static ble_nus_t                                         m_nus;                  /**< Structure to identify the Nordic UART Service. */
 static uint16_t m_conn_handle                            = BLE_CONN_HANDLE_INVALID;    /**< Handle of the current connection. */
 
 static ble_uuid_t m_adv_uuids[]                          = {{BLE_UUID_NUS_SERVICE, NUS_SERVICE_UUID_TYPE}};    /**< Universally unique service identifier. */
@@ -120,7 +119,7 @@ void send_msg_to_fc_controller(uint8_t* pdata, uint8_t bytes)
 
    for (i = 0; i < (bytes); i++)
    {
-      while(app_uart_put(*pdata) != NRF_SUCCESS)
+      while(app_uart_put(*(pdata + i)) != NRF_SUCCESS)
       {
          nrf_delay_us(DELAY_TIME_BETWEEN_BYTE);
       }
@@ -309,7 +308,7 @@ static void services_init(void)
    memset(&nus_init, 0, sizeof(nus_init));
 
    nus_init.data_handler                                 = bt_transmitter_ble_data_handler;
-   err_code                                              = ble_nus_init(&m_nus, &nus_init);
+   err_code                                              = ble_nus_init(&(g_bt_Project->ble_nordic_uart_service), &nus_init);
    BT_TRANSMITTER_APP_ERROR_CHECK(err_code);
 }
 
@@ -439,12 +438,15 @@ static void on_ble_evt(ble_evt_t * p_ble_evt)
 #if defined(DEBUG_RTT_DEBUG)
          NRF_LOG_PRINTF("[%s-%d] BLE Connected !!! : %d \r\n", __FUNCTION__, __LINE__, BLE_GAP_EVT_CONNECTED);
 #endif
+         g_bt_Project->bt_connected                      = 1;
          break;
 
       case BLE_GAP_EVT_DISCONNECTED:
 #if defined(DEBUG_RTT_DEBUG)
          NRF_LOG_PRINTF("[%s-%d] BLE Disconnected !!! : %d \r\n", __FUNCTION__, __LINE__, BLE_GAP_EVT_DISCONNECTED);
 #endif
+         g_bt_Project->bt_connected                      = 0;
+         g_bt_Project->update_channel_data_for_fc.transmitter_start = 0;
          break;
 
       case BLE_GAP_EVT_CONN_PARAM_UPDATE :
@@ -472,14 +474,18 @@ static void on_ble_evt(ble_evt_t * p_ble_evt)
          break;
 
       case BLE_GATTS_EVT_WRITE :
+#if 0
 #if defined(DEBUG_RTT_DEBUG)
          NRF_LOG_PRINTF("[%s-%d] GATTS EVT WRITE !!! : %d \r\n", __FUNCTION__, __LINE__, BLE_GATTS_EVT_WRITE);
+#endif
 #endif
          break;
 
       default:
+#if 0
 #if defined(DEBUG_RTT_DEBUG)
          NRF_LOG_PRINTF("[%s-%d] default : %d \r\n", __FUNCTION__, __LINE__, p_ble_evt->header.evt_id);
+#endif
 #endif
          break;
    }
@@ -497,7 +503,7 @@ static void on_ble_evt(ble_evt_t * p_ble_evt)
 static void ble_evt_dispatch(ble_evt_t * p_ble_evt)
 {
    ble_conn_params_on_ble_evt(p_ble_evt);
-   ble_nus_on_ble_evt(&m_nus, p_ble_evt);
+   ble_nus_on_ble_evt(&(g_bt_Project->ble_nordic_uart_service), p_ble_evt);
    on_ble_evt(p_ble_evt);
    ble_advertising_on_ble_evt(p_ble_evt);
    bsp_btn_ble_on_ble_evt(p_ble_evt);
@@ -602,7 +608,7 @@ void uart_event_handle(app_uart_evt_t* p_event)
             }
             if (index != 0)
             {
-               err_code                                  = ble_nus_string_send(&m_nus, data_array, index);
+               err_code                                  = ble_nus_string_send(&(g_bt_Project->ble_nordic_uart_service), data_array, index);
                if (err_code != NRF_ERROR_INVALID_STATE)
                {
                   BT_TRANSMITTER_APP_ERROR_CHECK(err_code);
@@ -615,7 +621,7 @@ void uart_event_handle(app_uart_evt_t* p_event)
 
             if ((data_array[index - 1] == '\n') || (index >= (BLE_NUS_MAX_DATA_LEN)))
             {
-                err_code = ble_nus_string_send(&m_nus, data_array, index);
+                err_code = ble_nus_string_send(&(g_bt_Project->ble_nordic_uart_service), data_array, index);
                 if (err_code != NRF_ERROR_INVALID_STATE)
                 {
                     APP_ERROR_CHECK(err_code);
@@ -756,7 +762,12 @@ int main(void)
 
    uart_init();
 
+#if 0
    buttons_leds_init(&erase_bonds);
+#else
+   UNUSED_VARIABLE(erase_bonds);
+   UNUSED_VARIABLE(buttons_leds_init);
+#endif
    ble_stack_init();
    gap_params_init();
    services_init();
@@ -766,6 +777,11 @@ int main(void)
 #if defined(DEBUG_GPIO_PIN)
    nrf_gpio_cfg_output(DEBUG_GPIO_PIN);
    nrf_gpio_pin_write(DEBUG_GPIO_PIN, 0);
+#endif
+
+#if defined(DEBUG_GPIO_EXT_PIN)
+   nrf_gpio_cfg_output(DEBUG_GPIO_EXT_PIN);
+   nrf_gpio_pin_write(DEBUG_GPIO_EXT_PIN, 0);
 #endif
 
    BT_TRANSMITTER_APP_ERROR_CHECK(NRF_LOG_INIT());
@@ -795,7 +811,8 @@ int main(void)
    }
 
    g_bt_Project->update_channel_data_for_fc.channel_num  = 0;
-   g_bt_Project->update_channel_data_for_fc.channel_update = 0;
+   g_bt_Project->update_channel_data_for_fc.channel_data_complete = 0;
+   g_bt_Project->update_channel_data_for_fc.transmitter_start = 0;
    g_bt_Project->update_channel_data_for_fc.send_uart_fn = send_msg_to_fc_controller;
    fc_serial_rx_init(&(g_bt_Project->update_channel_data_for_fc));
 
@@ -811,6 +828,7 @@ int main(void)
    for (;;)
    {
       bt_transmitter_parser();
+      bt_transmitter_make_packet(&(g_bt_Project->update_channel_data_for_fc));
       power_manage();
    }
 }

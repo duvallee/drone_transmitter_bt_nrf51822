@@ -14,6 +14,7 @@
 #ifndef _BT_TRANSMITTER_PARSER_H_
 #define _BT_TRANSMITTER_PARSER_H_
 
+void bt_transmitter_send_response(uint8_t cmd, uint8_t option_1_high, uint8_t option_1_low, uint8_t option_2_high, uint8_t option_2_low);
 void bt_transmitter_parser();
 
 #endif      // _BT_TRANSMITTER_PARSER_H_
