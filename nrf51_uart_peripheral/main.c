@@ -79,8 +79,8 @@
 #define PROTOCOL_PACKET_BASIC_SIZE                       8
 #define PROTOCOL_PACKET_EXTRA_SIZE                       16
 
-#define PROTOCOL_HEADER_HIGH_VERSION                     0x10
-#define PROTOCOL_HEADER_LOW_VERSION                      0x01
+#define PROTOCOL_HEADER_HIGH_VERSION                     0xD7
+#define PROTOCOL_HEADER_LOW_VERSION                      0x5E
 
 // Command (byte : 4 bit (phone -> transmitter : 0x0?, transmitter -> phone : 0xF?)
 #define PROTOCOL_REGISTER_MESSAGE                        0x01
@@ -661,6 +661,7 @@ static int default_fc_packet(void* p_fc_packet, uint8_t* p_fc_acket_size)
  *
  *
  ******************************************************************/
+#define DEBUG_OUTPUT_FC_CHANNEL_DATA
 #define UART_RETRY_SEND_COUNT                            1
 static void timer_send_msg_to_fc_controller(void* pdata)
 {
@@ -669,10 +670,6 @@ static void timer_send_msg_to_fc_controller(void* pdata)
 #if defined(DEBUG_OUTPUT_FC_CHANNEL_DATA)
 // To output string per about 2 seconds
 static int msg_output_count                              = 0;
-   if (((msg_output_count++) % 90) == 0)
-   {
-      NRF_LOG_PRINTF("send packet to the FC \r\n");
-   }
 #endif
 
    for (i = 0; i < (gProject->fc_tx_packet_size); i++)
@@ -687,17 +684,15 @@ static int msg_output_count                              = 0;
 #endif
             return;
          }
-#if defined(DEBUG_OUTPUT_FC_CHANNEL_DATA)
-         if (((msg_output_count) % 90) == 0)
-         {
-            NRF_LOG_PRINTF("[0x%02X] ", gProject->fc_tx_buffer[i]);
-         }
-#endif
       }
    }
 #if defined(DEBUG_OUTPUT_FC_CHANNEL_DATA)
    if (((msg_output_count) % 90) == 0)
    {
+      for (i = 0; i < (gProject->fc_tx_packet_size); i++)
+      {
+         NRF_LOG_PRINTF("[0x%02X] ", gProject->fc_tx_buffer[i]);
+      }   
       NRF_LOG_PRINTF("\r\n");
    }
 #endif
