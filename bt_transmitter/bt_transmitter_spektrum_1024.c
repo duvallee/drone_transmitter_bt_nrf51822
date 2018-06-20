@@ -34,6 +34,7 @@
 #if defined(SERIAL_RX_SPEKTRUM_1024)
 #include "bt_transmitter_spektrum_1024.h"
 
+void send_msg_to_fc_controller(uint8_t* pdata, uint8_t bytes);
 
 // ----------------------------------------------------------------
 #define MAX_SPEKTRUM_CHANNEL_NUM                         7
@@ -46,6 +47,8 @@
 #define SPEKTRUM_DSMS_22MS                               0xA2                    // 2048
 #define SPEKTRUM_DSMX_11MS                               0xB2                    // 2048
 
+#define SPEKTRUM_1024_SERIAL_RX_TIME                     22                      // 22 ms
+
 // struct for SPEKTRUM 1024 Protocol
 typedef struct _RX_PACKET_SPEKTRUM_1024
 {
@@ -55,10 +58,7 @@ typedef struct _RX_PACKET_SPEKTRUM_1024
 } __attribute__ ((__packed__)) RX_PACKET_SPEKTRUM_1024;
 
 static RX_PACKET_SPEKTRUM_1024 g_RxPacket                = {0, };
-static RX_PACKET_SPEKTRUM_1024 g_SendRxPacket            = {0, };
 
-static uint8_t g_Active_Transmitter                      = 0;
-static uint8_t g_ChannelDataUpdating                     = 0;
 /******************************************************************
  *
  * Function Name : bt_transmitter_serial_rx_spektrum_1024_timer
@@ -67,10 +67,7 @@ static uint8_t g_ChannelDataUpdating                     = 0;
  ******************************************************************/
 void bt_transmitter_serial_rx_spektrum_1024_timer(void* pArg)
 {
-   BT_TRANSMITTER_CHANNEL_INFO* pBtTransmitterChannelInfo = (BT_TRANSMITTER_CHANNEL_INFO*) pArg;
-   UNUSED_VARIABLE(pBtTransmitterChannelInfo);
 
-#if 1
 #if defined(DEBUG_GPIO_PIN)
    if (nrf_gpio_pin_read(DEBUG_GPIO_PIN) == 0)
    {
@@ -81,16 +78,8 @@ void bt_transmitter_serial_rx_spektrum_1024_timer(void* pArg)
       nrf_gpio_pin_write(DEBUG_GPIO_PIN, 0);
    }
 #endif
-#endif
 
-   if (g_Active_Transmitter == 1)
-   {
-      if (g_ChannelDataUpdating == 0)
-      {
-         memcpy(&g_SendRxPacket, &g_RxPacket, sizeof(g_RxPacket));
-      }
-      (*pBtTransmitterChannelInfo->send_uart_fn)((uint8_t *) &g_SendRxPacket, sizeof(g_SendRxPacket));
-   }
+   send_msg_to_fc_controller((uint8_t *) &g_RxPacket, sizeof(g_RxPacket));
 }
 
 /******************************************************************
@@ -99,38 +88,34 @@ void bt_transmitter_serial_rx_spektrum_1024_timer(void* pArg)
  *
  *
  ******************************************************************/
-void bt_transmitter_make_packet(BT_TRANSMITTER_CHANNEL_INFO* pBtTransmitterChannelInfo)
+void bt_transmitter_make_packet()
 {
-   uint16_t i;
+   int i;
+   uint16_t* pChannelData                                   = &(g_bt_Project->bt_protocol_packet.throttle);
 
-   if (pBtTransmitterChannelInfo->channel_data_complete == 1)
+   if ((g_bt_Project->bt_protocol_packet.header & 0xFFF0) == PROTOCOL_VERSION && g_bt_Project->bt_connected == 1)
    {
-      g_ChannelDataUpdating                              = 1;
-      g_RxPacket.fades                                   = 0;
-      g_RxPacket.system                                  = SPEKTRUM_DSM2_22MS;
+      g_RxPacket.fades                                      = 0;
+      g_RxPacket.system                                     = SPEKTRUM_DSM2_22MS;
 
       for (i = 0; i < MAX_SPEKTRUM_CHANNEL_NUM; i++)
       {
-         g_RxPacket.channel[i]                           = ((pBtTransmitterChannelInfo->channel[i] >> 14) & 0x00FC) |
-                                                           ((pBtTransmitterChannelInfo->channel[i] <<  8) & 0xFF00) |
-                                                           ((pBtTransmitterChannelInfo->channel[i] >>  8) & 0x0003);
-#if 0
-#if defined(DEBUG_RTT_DEBUG)
-         NRF_LOG_PRINTF("[%s-%d] [%d] : 0x%04X (%d) \r\n", __FUNCTION__, __LINE__, i, g_RxPacket.channel[i], sizeof(g_SendRxPacket));
-#endif
-#endif
+         g_RxPacket.channel[i]                              = ((*pChannelData >> 14) & 0x00FC) |
+                                                              ((*pChannelData <<  8) & 0xFF00) |
+                                                              ((*pChannelData >>  8) & 0x0003);
       }
-      g_ChannelDataUpdating                              = 0;
-      pBtTransmitterChannelInfo->channel_data_complete = 0;
-   }
-   if (pBtTransmitterChannelInfo->transmitter_start == 1)
-   {
-      g_Active_Transmitter                               = 1;
    }
    else
    {
-      memset(&g_RxPacket, 0, sizeof(g_RxPacket));
-      g_Active_Transmitter                               = 0;
+      memset(&g_RxPacket, 0, sizeof(RX_PACKET_SPEKTRUM_1024));
+      g_RxPacket.fades                                      = 0;
+      g_RxPacket.system                                     = SPEKTRUM_DSM2_22MS;
+
+      for (i = 0; i < MAX_SPEKTRUM_CHANNEL_NUM; i++)
+      {
+         g_RxPacket.channel[i]                              = ((i >> 14) & 0x00FC);
+      }
+      return;
    }
 }
 
@@ -140,9 +125,10 @@ void bt_transmitter_make_packet(BT_TRANSMITTER_CHANNEL_INFO* pBtTransmitterChann
  *
  *
  ******************************************************************/
-void fc_serial_rx_init(BT_TRANSMITTER_CHANNEL_INFO* pBtTransmitterChannelInfo)
+void fc_serial_rx_init(void)
 {
-   add_timer(bt_transmitter_serial_rx_spektrum_1024_timer, SPEKTRUM_1024_SERIAL_RX_TIME, -1, (void*) pBtTransmitterChannelInfo);
+   bt_transmitter_make_packet();
+   add_timer(bt_transmitter_serial_rx_spektrum_1024_timer, SPEKTRUM_1024_SERIAL_RX_TIME, -1, (void*) NULL);
 }
 
 #endif

@@ -18,26 +18,8 @@
 #define MILLISECOND                                      1000
 
 // -----------------------------------------------------------------------------
-// Command (byte : 4 bit (phone -> transmitter : 0x0?, transmitter -> phone : 0xF?)
-#define PROTOCOL_REGISTER_MESSAGE                        0x01
-#define PROTOCOL_REGISTER_RESPONSE                       0xF1
-#define PROTOCOL_ALIVE_MESSAGE                           0x02
-#define PROTOCOL_ALIVE_RESPONSE                          0xF2
-#define PROTOCOL_CHANNEL_MESSAGE                         0x03
-#define PROTOCOL_CHANNEL_RESPONSE                        0xF3
-#define PROTOCOL_UNKNOWN_RESPONSE                        0xFF
-
-#define PROTOCOL_HEADER_HIGH_SYNC                        0xD7
-#define PROTOCOL_HEADER_LOW_SYNC                         0x5E
-
-// -----------------------------------------------------------------------------
-// Error Code
-#define PROTOCOL_SUCCESS                                 0x00
-#define PROTOCOL_BUSY_ERROR                              0x01
-#define PROTOCOL_CRC_ERROR                               0x02
-#define PROTOCOL_MISSMATCHED_SIZE                        0x03
-#define PROTOCOL_UNKNOWN_COMMAND                         0xF0
-
+// Protocol v.1.0 - 2018-06-18
+#define PROTOCOL_VERSION                                 0x10A0
 
 // -----------------------------------------------------------------------------
 // time
@@ -46,6 +28,7 @@ typedef struct _BT_TRANSMITTER_TIME
    uint32_t milli_second;
    uint32_t second;
 } BT_TRANSMITTER_TIME;
+
 
 // -----------------------------------------------------------------------------
 // timer
@@ -65,108 +48,43 @@ typedef struct _BT_TRANSMITTER_TIMER
    void* pData;
 } BT_TRANSMITTER_TIMER;
 
-// -----------------------------------------------------------------------------
-// channel info
-#define MAX_CHANNEL_INFO_COUNT                           32
-typedef void (*SEND_UART_FN)(uint8_t*, uint8_t);
-typedef struct _BT_TRANSMITTER_CHANNEL_INFO
-{
-   uint8_t channel_num;
-   uint8_t channel_data_complete;
-   uint8_t transmitter_start;
-
-   SEND_UART_FN send_uart_fn;
-   
-   uint32_t channel[MAX_CHANNEL_INFO_COUNT];                                     // high 16 bit : channel id, low 16 bit : value
-} BT_TRANSMITTER_CHANNEL_INFO;
 
 // -----------------------------------------------------------------------------
-// protocol
-
-// base
-typedef struct _BT_PROTOCOL_BASE
+// protocol (20 bytes)
+typedef struct _BT_PROTOCOL_V1
 {
-   // 4 bytes
-   uint8_t high_sync_byte;
-   uint8_t low_sync_byte;
-   uint8_t command;
-   uint8_t size;
+   // 2 bytes header
+   uint16_t header;                                                              // major ver(4bits) - minor ver(4bits) - sub ver(4bits) - command(4bits)
 
-   // 4 bytes
-   uint8_t option_1_high;
-   uint8_t option_1_low;
-   uint8_t option_2_high;
-   uint8_t option_2_low;
-} __attribute__ ((__packed__)) BT_PROTOCOL_BASE;
-
-// channel
-typedef struct _BT_PROTOCOL_CHANNEL_DATA
-{
-   // 8 bytes
-   BT_PROTOCOL_BASE base_protocol;
-
-   // 4 bytes
-   uint16_t channel_1;                                   // ROLL
-   uint16_t channel_2;                                   // PITCH
-
-   // 4 bytes
-   uint16_t channel_3;                                   // YAW
-   uint16_t channel_4;                                   // THROTTLE
-
-   // 4 bytes
-   uint16_t channel_5;                                   // GEAR (Armming)
-   uint16_t channel_6;                                   // AUX_1
-
-   // 4 bytes
-   uint16_t channel_7;                                   // AUX_2
-   uint16_t channel_8;                                   // AUX_3
-
-   // 4 bytes
-   uint16_t channel_9;                                   // AUX_4
-   uint16_t channel_10;                                  // AUX_5
-
-   // 4 bytes
-   uint16_t channel_11;                                  // AUX_6
-   uint16_t channel_12;                                  // AUX_7
-} __attribute__ ((__packed__)) BT_PROTOCOL_CHANNEL_DATA;
-
-// channel
-typedef struct _BT_PROTOCOL_DATA
-{
-   BT_PROTOCOL_CHANNEL_DATA bt_protocol_channel_data;
-
-   uint8_t received_packet_size;
-   uint8_t complete_packet;
-} __attribute__ ((__packed__)) BT_PROTOCOL_DATA;
-
+   uint16_t throttle;                                                            // up/down
+   uint16_t roll;                                                                // left/right move
+   uint16_t pitch;                                                               // forward/backward move
+   uint16_t yaw;                                                                 // left/right rotation
+   uint16_t ch1;                                                                 // armming
+   uint16_t ch2;                                                                 //
+   uint16_t ch3;                                                                 //
+   uint16_t ch4;                                                                 //
+   uint16_t ch5;                                                                 //
+} __attribute__ ((__packed__)) BT_PROTOCOL_V1;
 
 // -----------------------------------------------------------------------------
 // project
 typedef struct _BT_PROJECT
 {
    uint32_t tick_count;
+
    BT_TRANSMITTER_TIME system_time;
-
-   uint8_t bt_connected;
-
    BT_TRANSMITTER_TIMER timer[BT_TRANSMITTER_MAX_TIMER];
 
-   // received from bt
-   BT_PROTOCOL_DATA bt_protocol_data;
-
-   // alive tick count
-   uint32_t alive_receive_tick_count;
-
-   // channel data for fc
-   BT_TRANSMITTER_CHANNEL_INFO update_channel_data_for_fc;                       // channel info for the flight controller
-
-   // bt
    ble_nus_t ble_nordic_uart_service;
+
+   uint8_t bt_connected;
+   BT_PROTOCOL_V1 bt_protocol_packet;
 } BT_PROJECT;
 
 extern BT_PROJECT g_bt_Project[1];
-#define DEBUG_RTT_ERROR
 
+#define DEBUG_RTT_ERROR
 #define DEBUG_RTT_DEBUG
 
 #if defined(DEBUG_RTT_DEBUG)
@@ -175,4 +93,5 @@ extern BT_PROJECT g_bt_Project[1];
 #endif
 
 #endif   // _PROJECT_H_
+
 
